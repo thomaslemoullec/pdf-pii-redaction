@@ -17,8 +17,10 @@ import random
 import time
 from collections.abc import Callable
 
-# HTTP statuses worth retrying: request timeout, rate limit, and the 5xx family.
-_TRANSIENT_CODES = frozenset({408, 429, 500, 502, 503, 504})
+# HTTP statuses worth retrying: request timeout, client-cancel/deadline, rate limit, and
+# the 5xx family. 499 (CANCELLED) shows up on the global endpoint when a slow image-gen
+# call is cut — transient, so retry it.
+_TRANSIENT_CODES = frozenset({408, 429, 499, 500, 502, 503, 504})
 
 # Exception class names that are transient regardless of an exposed code — covers
 # google-genai (ServerError), google-api-core, and requests/urllib network errors.
@@ -29,6 +31,8 @@ _TRANSIENT_NAMES = frozenset(
         "ServiceUnavailable",
         "ResourceExhausted",
         "DeadlineExceeded",
+        "Cancelled",
+        "CancelledError",
         "InternalServerError",
         "TooManyRequests",
         "Aborted",

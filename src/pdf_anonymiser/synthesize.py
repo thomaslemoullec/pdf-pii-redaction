@@ -18,7 +18,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol
 
-from .retry import retry_call
+from .retry import is_transient, retry_call
+
+
+class _EmptyImageResponse(RuntimeError):
+    """The image model returned no image part (empty/safety-blocked response). Often
+    transient on dense pages, so it's treated as retryable."""
 
 if TYPE_CHECKING:
     from PIL.Image import Image
@@ -48,7 +53,7 @@ class GeminiImageAnonymizer:
     """
 
     def __init__(
-        self, settings: Settings, *, client: Any = None, prompt_version: str = "anonymize_v1"
+        self, settings: Settings, *, client: Any = None, prompt_version: str = "anonymize_v3"
     ) -> None:
         self._settings = settings
         self._client = client
@@ -80,21 +85,26 @@ class GeminiImageAnonymizer:
         image.convert("RGB").save(buffer, format="PNG")
         page_part = genai_types.Part.from_bytes(data=buffer.getvalue(), mime_type="image/png")
 
-        def _call() -> Any:
-            return client.models.generate_content(
+        def _call() -> bytes:
+            resp = client.models.generate_content(
                 model=self._settings.image_model,
                 contents=[instruction, page_part],
                 config=genai_types.GenerateContentConfig(response_modalities=["IMAGE"]),
             )
+            # Defensive parse: candidates / content / parts can each be None when the
+            # model returns an empty or safety-blocked response (common on dense pages) —
+            # never iterate a None. If no image part is found, raise a RETRYABLE error.
+            for cand in getattr(resp, "candidates", None) or []:
+                for part in getattr(getattr(cand, "content", None), "parts", None) or []:
+                    inline = getattr(part, "inline_data", None)
+                    if inline is not None and inline.data:
+                        return inline.data
+            raise _EmptyImageResponse("image model returned no image part")
 
-        response = retry_call(
+        data = retry_call(
             _call,
             attempts=self._settings.gemini_max_attempts,
             base_delay=self._settings.gemini_retry_base_delay_s,
+            retryable=lambda e: is_transient(e) or isinstance(e, _EmptyImageResponse),
         )
-        parts = response.candidates[0].content.parts
-        for part in parts:
-            inline = getattr(part, "inline_data", None)
-            if inline is not None and inline.data:
-                return PILImage.open(io.BytesIO(inline.data)).convert("RGB")
-        raise ValueError("anonymizer returned no image part")
+        return PILImage.open(io.BytesIO(data)).convert("RGB")

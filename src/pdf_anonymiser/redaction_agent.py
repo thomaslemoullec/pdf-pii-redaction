@@ -78,11 +78,17 @@ class FeedbackTool:
     def correction(self, report: RedactionReport) -> str:
         m = report.metrics
         parts: list[str] = []
-        if report.dlp_leaks:
+        if report.certified_dlp_leaks:
             parts.append(
                 f"Cloud DLP still detects these certified PII types in your output: "
-                f"{', '.join(report.dlp_leaks)} — these are REAL values that survived; "
-                "locate and replace every one with a synthetic equivalent of the same format"
+                f"{', '.join(report.certified_dlp_leaks)} — these are REAL values that "
+                "survived; locate and replace every one with a synthetic equivalent of the "
+                "same format"
+            )
+        if report.soft_dlp_leaks:
+            parts.append(
+                f"Cloud DLP flagged a {', '.join(report.soft_dlp_leaks)} that may match the "
+                "source — choose a clearly DIFFERENT synthetic value for every name"
             )
         if m.pii_leaked:
             parts.append(
@@ -212,7 +218,8 @@ class DlpLeakTool:
 
 
 def _score(report: RedactionReport) -> float:
-    """Ranking key for 'best attempt': a certified DLP leak sinks the score to 0."""
+    """Ranking key for 'best attempt': any DLP carryover sinks the score to 0, so the
+    agent prefers an output that DLP flags nothing in (even a soft name hit loses)."""
     if report.dlp_leaks:
         return 0.0
     return float(report.metrics.score)

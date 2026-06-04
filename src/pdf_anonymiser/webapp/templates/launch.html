@@ -25,11 +25,24 @@
     </label>
 
     <fieldset class="review-policy">
-      <legend>Which documents need human review?</legend>
-      <label class="radio"><input type="radio" name="review_mode" value="all" checked> <b>All</b> <span class="muted small">— queue every document (default)</span></label>
-      <label class="radio"><input type="radio" name="review_mode" value="flagged"> <b>Only flagged</b> <span class="muted small">— a leak, low fidelity, an error, or score below</span>
-        <input class="input input-tiny" type="number" name="review_threshold" min="0" max="1" step="0.01" value="0" title="score threshold"></label>
-      <p class="muted small">Auto-approved documents skip the queue (useful for hundreds of docs) — you can still see them with the "all" filter.</p>
+      <legend>Send to human review when below…</legend>
+      <label class="slider-row">
+        <span class="slider-label">Fidelity threshold <span class="muted small">— how much non-PII text must be preserved</span></span>
+        <span class="slider-ctl">
+          <input type="range" name="fidelity_threshold" min="0" max="1" step="0.01" value="0.85"
+                 oninput="this.nextElementSibling.value=(+this.value).toFixed(2)">
+          <output class="slider-val">0.85</output>
+        </span>
+      </label>
+      <label class="slider-row">
+        <span class="slider-label">Overall score threshold <span class="muted small">— combined removal × fidelity (F1)</span></span>
+        <span class="slider-ctl">
+          <input type="range" name="score_threshold" min="0" max="1" step="0.01" value="0.85"
+                 oninput="this.nextElementSibling.value=(+this.value).toFixed(2)">
+          <output class="slider-val">0.85</output>
+        </span>
+      </label>
+      <p class="muted small">A document is queued if its <b>fidelity</b> or its <b>overall score</b> is below the bar — leaks and errors are always reviewed. Clean, high-scoring documents auto-approve (handy for large runs).</p>
     </fieldset>
 
     <label>Describe the documents or the PII you expect <span class="muted small">(optional — an assistant turns this into a PII-type scope; leave blank to scan for everything)</span>

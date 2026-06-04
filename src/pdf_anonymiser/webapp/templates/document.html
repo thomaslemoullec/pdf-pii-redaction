@@ -141,12 +141,10 @@
   </div>
   {% endif %}
 
-  {% if p.anon or p.source %}
   <div class="pii-pair">
-    {% if p.source %}<figure><figcaption class="muted small">Source (original) · click to zoom</figcaption><img class="zoomable" src="{{ p.source }}" alt="source page {{ p.page_no }}"></figure>{% endif %}
-    {% if p.anon %}<figure><figcaption class="muted small">Synthetic (PII-free) · click to zoom</figcaption><img class="zoomable" src="{{ p.anon }}" alt="synthetic page {{ p.page_no }}"></figure>{% endif %}
+    <figure><figcaption class="muted small">Source (original) · click to zoom</figcaption><img class="zoomable" loading="lazy" src="/jobs/{{ doc.job_id }}/doc/{{ doc.document_id }}/src/{{ p.page_no - 1 }}" alt="source page {{ p.page_no }}"></figure>
+    {% if p.get('anon_uri') %}<figure><figcaption class="muted small">Synthetic (PII-free) · click to zoom</figcaption><img class="zoomable" loading="lazy" src="/jobs/{{ doc.job_id }}/doc/{{ doc.document_id }}/anon/{{ loop.index0 }}" alt="synthetic page {{ p.page_no }}"></figure>{% endif %}
   </div>
-  {% else %}<p class="muted small">Preview unavailable.</p>{% endif %}
   {% endif %}
 </section>
 {% endfor %}

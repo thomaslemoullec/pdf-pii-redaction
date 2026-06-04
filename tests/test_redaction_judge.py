@@ -89,6 +89,10 @@ def test_build_report_assembles_signals_and_dlp_override() -> None:
     assert report.judge_layout_ok is False
     assert report.judge_leaked is False
 
-    # a certified DLP leak overrides clean metrics → fail
-    report2 = build_report(clean, judgement, ("name",))
-    assert report2.dlp_leaks == ("name",) and report2.verdict == "fail"
+    # a certified DLP leak (checksum/structured type) overrides clean metrics → fail
+    report2 = build_report(clean, judgement, ("iban_account",))
+    assert report2.dlp_leaks == ("iban_account",) and report2.verdict == "fail"
+
+    # a SOFT DLP type (name/other) is noisy on synthetic output → review, not a hard fail
+    report3 = build_report(clean, _j(), ("name",))  # judge clean, only a name carryover
+    assert report3.dlp_leaks == ("name",) and report3.verdict == "review"

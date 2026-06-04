@@ -18,7 +18,6 @@ Routes (all server-rendered HTML, HTMX for live progress):
 
 from __future__ import annotations
 
-import base64
 import os
 from collections.abc import Callable
 from datetime import datetime
@@ -159,15 +158,6 @@ def _derive_status(status: str, review_pending: int) -> tuple[str, str]:
     return ("pending review", "") if review_pending else ("validated", "ok")
 
 
-def _data_uri(image: Any) -> str:
-    """Encode a PIL image as an inline PNG data-URI (avoids a separate serving route)."""
-    import io
-
-    buf = io.BytesIO()
-    image.convert("RGB").save(buf, format="PNG")
-    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
-
-
 # --- the default Cloud Run launcher (no-op locally) -------------------------
 
 
@@ -182,7 +172,7 @@ def _default_launcher() -> Callable[..., None]:
     def launch(
         job_id: str, *, source: str, output: str, label: str, pii_types: str,
         limit: int | None = None, total: int = 0,
-        review_mode: str = "all", review_threshold: float = 0.0, rerun: bool = False,
+        fidelity_threshold: float = 0.85, score_threshold: float = 0.85, rerun: bool = False,
     ) -> None:
         job_name = os.environ.get("PII_BATCH_JOB_NAME")
         if not job_name:
@@ -205,7 +195,8 @@ def _default_launcher() -> Callable[..., None]:
         )
         args = ["--job-id", job_id, "--source", source, "--output", output,
                 "--label", label, "--pii-types", pii_types,
-                "--review-mode", review_mode, "--review-threshold", str(review_threshold)]
+                "--fidelity-threshold", str(fidelity_threshold),
+                "--score-threshold", str(score_threshold)]
         if limit and limit > 0:
             args += ["--limit", str(limit)]
         if rerun:
@@ -399,7 +390,7 @@ def create_app(
     def launch_job(
         source: str = Form(...), output: str = Form(...), label: str = Form("documents"),
         types: list[str] = Form(default=[]), limit: int = Form(0),
-        review_mode: str = Form("all"), review_threshold: float = Form(0.0),
+        fidelity_threshold: float = Form(0.85), score_threshold: float = Form(0.85),
     ) -> Response:
         from ..pii_batch import list_source_pdfs
 
@@ -411,11 +402,11 @@ def create_app(
         job_id = _result_store().create_job(
             dataset=label, source_uri=source, output_uri=output,
             pii_types=list(types), total=total,
-            review_mode=review_mode, review_threshold=review_threshold,
+            fidelity_threshold=fidelity_threshold, score_threshold=score_threshold,
         )
         _launch(job_id, source=source, output=output, label=label,
                 pii_types=",".join(types), limit=capped, total=total,
-                review_mode=review_mode, review_threshold=review_threshold)
+                fidelity_threshold=fidelity_threshold, score_threshold=score_threshold)
         return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 
     @app.get("/jobs/{job_id}", response_class=HTMLResponse)
@@ -461,43 +452,57 @@ def create_app(
         doc = _result_store().get_document(job_id, doc_id)
         if doc is None:
             return PlainTextResponse("document not found", status_code=404)
-        store_obj = _object_store()
-
-        def _read_data_uri(uri: str) -> str:
-            try:
-                data = store_obj.read(uri) if uri else b""
-            except Exception:
-                return ""
-            return "data:image/png;base64," + base64.b64encode(data).decode() if data else ""
-
-        # Render the SOURCE pages on demand so the reviewer can compare original vs
-        # synthetic and verify PII was actually removed (not just that the output looks
-        # clean). Best-effort: if the source can't be read, show the synthetic only.
-        source_uris: list[str] = []
-        try:
-            from ..gemini_client import render_pdf
-
-            src_pages = render_pdf(store_obj.read(doc.source_uri), 150)
-            source_uris = [_data_uri(img) for img in src_pages]
-        except Exception:
-            source_uris = []
-
-        pages = []
-        for idx, p in enumerate(doc.pages):
-            pages.append({
-                **p,
-                "anon": _read_data_uri(str(p.get("anon_uri", ""))),
-                "source": source_uris[idx] if idx < len(source_uris) else "",
-            })
-        # The review queue (worst-score-first) drives the guided "next" flow + counter.
+        # Page images are served LAZILY (see /src and /anon routes below) and loaded by the
+        # browser on demand — so a 20-page document no longer renders + base64-inlines every
+        # page into one response, which OOM'd the instance. The template just emits <img>
+        # URLs; metadata is the raw per-page records.
         queue = _review_queue(job_id)
         position = next((i for i, d in enumerate(queue) if d.document_id == doc_id), None)
         return templates.TemplateResponse(
             request, "document.html",
-            {"doc": doc, "pages": pages, "summary": _doc_summary(doc.pages),
+            {"doc": doc, "pages": doc.pages, "summary": _doc_summary(doc.pages),
              "review_remaining": len(queue),
              "review_position": (position + 1) if position is not None else None},
         )
+
+    def _png_response(data: bytes) -> Response:
+        # Cache in the browser: page images are immutable for a given result.
+        return Response(content=data, media_type="image/png",
+                        headers={"Cache-Control": "private, max-age=3600"})
+
+    @app.get("/jobs/{job_id}/doc/{doc_id}/src/{idx}")
+    def doc_source_page(job_id: str, doc_id: str, idx: int) -> Response:
+        # Render ONE source page on demand (bounded memory). idx = 0-based PDF page index.
+        doc = _result_store().get_document(job_id, doc_id)
+        if doc is None:
+            return Response(status_code=404)
+        try:
+            import io
+
+            from ..gemini_client import render_pdf_page
+
+            img = render_pdf_page(_object_store().read(doc.source_uri), idx, 150)
+            if img is None:
+                return Response(status_code=404)
+            buf = io.BytesIO()
+            img.convert("RGB").save(buf, format="PNG")
+            return _png_response(buf.getvalue())
+        except Exception:
+            return Response(status_code=404)
+
+    @app.get("/jobs/{job_id}/doc/{doc_id}/anon/{idx}")
+    def doc_anon_page(job_id: str, doc_id: str, idx: int) -> Response:
+        # Stream ONE stored synthetic page. idx = position in the document's pages list.
+        doc = _result_store().get_document(job_id, doc_id)
+        if doc is None or idx < 0 or idx >= len(doc.pages):
+            return Response(status_code=404)
+        uri = str(doc.pages[idx].get("anon_uri", ""))
+        if not uri:
+            return Response(status_code=404)
+        try:
+            return _png_response(_object_store().read(uri))
+        except Exception:
+            return Response(status_code=404)
 
     @app.post("/jobs/{job_id}/doc/{doc_id}/rerun")
     def rerun(job_id: str, doc_id: str) -> Response:
@@ -514,7 +519,8 @@ def create_app(
         _launch(
             job_id, source=doc.source_uri, output=job.output_uri, label=job.dataset,
             pii_types=",".join(job.pii_types), total=1,
-            review_mode=job.review_mode, review_threshold=job.review_threshold, rerun=True,
+            fidelity_threshold=job.fidelity_threshold, score_threshold=job.score_threshold,
+            rerun=True,
         )
         return RedirectResponse(f"/jobs/{job_id}/doc/{doc_id}?rerunning=1", status_code=303)
 
@@ -532,7 +538,8 @@ def create_app(
             _launch(
                 job_id, source=d.source_uri, output=job.output_uri, label=job.dataset,
                 pii_types=",".join(job.pii_types), total=1,
-                review_mode=job.review_mode, review_threshold=job.review_threshold, rerun=True,
+                fidelity_threshold=job.fidelity_threshold, score_threshold=job.score_threshold,
+                rerun=True,
             )
         return RedirectResponse(f"/jobs/{job_id}?relaunched={len(errors[:_MAX_TASKS])}", status_code=303)
 

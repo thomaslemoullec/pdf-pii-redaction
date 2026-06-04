@@ -96,7 +96,7 @@ resource "google_cloud_run_v2_service" "ui" {
       resources {
         limits = {
           cpu    = "1"
-          memory = "1Gi"
+          memory = "2Gi" # headroom for rendering PDF page previews under concurrent loads
         }
         startup_cpu_boost = true # faster cold start on the rare scale-from-zero
       }

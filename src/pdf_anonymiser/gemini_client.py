@@ -26,6 +26,24 @@ def render_pdf(pdf_bytes: bytes, dpi: int) -> list[Image]:
         pdf.close()
 
 
+def render_pdf_page(pdf_bytes: bytes, page_index: int, dpi: int) -> Image | None:
+    """Render a SINGLE PDF page to a PIL Image — bounded memory, for lazy UI previews.
+
+    Returns None for an out-of-range index. Unlike :func:`render_pdf`, this never holds
+    every page in memory at once, so the review UI can serve a 20-page document's pages
+    on demand without an OOM."""
+    import pypdfium2 as pdfium
+
+    scale = dpi / 72.0
+    pdf = pdfium.PdfDocument(pdf_bytes)
+    try:
+        if page_index < 0 or page_index >= len(pdf):
+            return None
+        return pdf[page_index].render(scale=scale).to_pil()
+    finally:
+        pdf.close()
+
+
 def make_client(settings: Settings) -> Any:
     """Construct the production ``google-genai`` client on the Vertex AI backend.
 

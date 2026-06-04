@@ -18,6 +18,13 @@ from typing import TYPE_CHECKING, Any, Protocol
 from .redaction_metrics import RedactionMetrics
 from .retry import retry_call
 
+# DLP infoTypes that are noisy on a *synthetic* output: the page is regenerated full of
+# fake names, and DLP's name detector collides with common name tokens, so a "name"/"other"
+# carryover is unreliable as a hard leak. These DOWNGRADE to a human review instead of a
+# hard fail — the deterministic value-match and certified (checksum-validated) types still
+# fail. See the corroboration logic in redaction_metrics.
+_SOFT_DLP_TYPES = frozenset({"name", "other"})
+
 if TYPE_CHECKING:
     from PIL.Image import Image
 
@@ -130,7 +137,7 @@ class RedactionReport:
 
     metrics: RedactionMetrics
     rationale: str  # the LLM's human explanation (semantic, catches what tokens miss)
-    dlp_leaks: tuple[str, ...] = ()  # certified PII types still present in the output
+    dlp_leaks: tuple[str, ...] = ()  # PII types Cloud DLP still detected in the output
     # The Gemini judge's own structured assessment (vision), alongside the metrics.
     judge_all_removed: bool = True  # judge: every piece of PII was replaced
     judge_layout_ok: bool = True  # judge: non-personal content + layout unchanged
@@ -138,22 +145,31 @@ class RedactionReport:
     attempts: int = 1  # how many anonymise→judge rounds this page took (cost driver)
 
     @property
+    def certified_dlp_leaks(self) -> tuple[str, ...]:
+        """DLP carryovers that are authoritative (checksum/structured types) → hard fail."""
+        return tuple(t for t in self.dlp_leaks if t not in _SOFT_DLP_TYPES)
+
+    @property
+    def soft_dlp_leaks(self) -> tuple[str, ...]:
+        """DLP carryovers on noisy types (name/other) → route to a human, don't fail."""
+        return tuple(t for t in self.dlp_leaks if t in _SOFT_DLP_TYPES)
+
+    @property
     def verdict(self) -> str:
         """One AI verdict that reconciles all three signals — metric, DLP, and judge.
 
         - **fail** on a *leak*, owned by the deterministic signals: the metric's exact
-          value-match (`pii_leaked`) or a certified DLP carryover. The LLM judge's own
-          "leaked" flag also counts, but a real value surviving is decided by the
-          deterministic check, not the model.
-        - **review** when nothing leaked but a signal *doubts* the result — fidelity
-          dipped, or the judge says not everything was replaced / the layout drifted.
-          So the verdict never silently says "pass" while the judge disagrees: a
-          metric/judge disagreement routes to a human instead.
+          value-match (`pii_leaked`) or a **certified** DLP carryover (checksum/structured
+          types). The LLM judge's own "leaked" flag also counts.
+        - **review** when nothing certainly leaked but a signal *doubts* the result —
+          fidelity dipped, the judge says not everything was replaced / the layout drifted,
+          OR a **soft** DLP carryover (a `name`/`other` hit, which false-positives on the
+          synthetic output's fake names). A human confirms instead of an auto-fail.
         - **pass** only when every signal agrees it's clean.
         """
-        if self.dlp_leaks or self.metrics.pii_leaked > 0 or self.judge_leaked:
+        if self.certified_dlp_leaks or self.metrics.pii_leaked > 0 or self.judge_leaked:
             return "fail"
-        if (self.metrics.fidelity < self.metrics.fidelity_threshold
+        if (self.soft_dlp_leaks or self.metrics.fidelity < self.metrics.fidelity_threshold
                 or not self.judge_all_removed or not self.judge_layout_ok):
             return "review"
         return "pass"

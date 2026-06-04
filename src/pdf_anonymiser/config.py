@@ -63,6 +63,10 @@ class Settings:
     # independent and the slow leg is Pro image-gen, so parallelism turns an N-page
     # wait into ~one page's wait. Capped to stay within Vertex quota.
     pii_max_parallel: int
+    # Fidelity gate: the share of NON-PII text that must survive for a page to count as
+    # clean. Below this the page verdict is "review" (layout/content drifted). 0.85 by
+    # default (scanned pages are noisy); a launch can override it per job (slider).
+    fidelity_threshold: float
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -81,4 +85,5 @@ class Settings:
             pii_use_dlp=os.environ.get("PII_USE_DLP", "0") == "1",
             pii_dlp_leak_check=os.environ.get("PII_DLP_LEAK_CHECK", "1") == "1",
             pii_max_parallel=int(os.environ.get("PII_MAX_PARALLEL", "4")),
+            fidelity_threshold=float(os.environ.get("FIDELITY_THRESHOLD", "0.85")),
         )

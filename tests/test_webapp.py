@@ -30,10 +30,10 @@ def _client(tmp_path: Path, store_obj: InMemoryObjectStore, launches: list):  # 
     rs = InMemoryPiiResultStore()
 
     def launcher(job_id, *, source, output, label, pii_types,  # type: ignore[no-untyped-def]
-                 limit=None, total=0, review_mode="all", review_threshold=0.0, rerun=False):
+                 limit=None, total=0, fidelity_threshold=0.85, score_threshold=0.85, rerun=False):
         launches.append({"job_id": job_id, "types": pii_types, "limit": limit,
-                         "total": total, "review_mode": review_mode, "rerun": rerun,
-                         "source": source})
+                         "total": total, "fidelity_threshold": fidelity_threshold,
+                         "score_threshold": score_threshold, "rerun": rerun, "source": source})
 
     def planner(description):  # type: ignore[no-untyped-def]
         from pdf_anonymiser.pii import PiiType
@@ -75,14 +75,15 @@ def test_launch_creates_job_and_calls_launcher(tmp_path) -> None:  # type: ignor
     client, rs = _client(tmp_path, obj, launches)
     r = client.post("/jobs", data={
         "source": "gs://src/in/", "output": "gs://out/kyc/pii_free",
-        "label": "kyc", "types": ["name", "iban_account"], "review_mode": "flagged",
+        "label": "kyc", "types": ["name", "iban_account"],
+        "fidelity_threshold": "0.8", "score_threshold": "0.9",
     }, follow_redirects=False)
     assert r.status_code == 303
     jobs = rs.list_jobs()
     assert len(jobs) == 1 and jobs[0].total == 2 and jobs[0].pii_types == ["name", "iban_account"]
-    assert jobs[0].review_mode == "flagged"
+    assert jobs[0].fidelity_threshold == 0.8 and jobs[0].score_threshold == 0.9
     assert launches[0]["types"] == "name,iban_account" and launches[0]["total"] == 2
-    assert launches[0]["review_mode"] == "flagged"
+    assert launches[0]["fidelity_threshold"] == 0.8 and launches[0]["score_threshold"] == 0.9
 
 
 def test_end_to_end_launch_process_accept_and_reject(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -140,10 +141,10 @@ def test_review_policy_flagged_auto_approves_clean_docs(tmp_path) -> None:  # ty
     client, rs = _client(tmp_path, obj, [])
     job_id = rs.create_job(
         dataset="k", source_uri="gs://src/in/", output_uri="gs://out/kyc/pii_free",
-        pii_types=[], total=0, review_mode="flagged", review_threshold=0.0,
+        pii_types=[], total=0, fidelity_threshold=0.85, score_threshold=0.85,
     )
     from pdf_anonymiser.pii_result_store import ReviewPolicy
-    _run_job(rs, obj, job_id, review_policy=ReviewPolicy(mode="flagged"))
+    _run_job(rs, obj, job_id, review_policy=ReviewPolicy(score_threshold=0.0))
     # the fake review returns a clean 'pass' → auto-approved → not in the review queue
     queue, n = rs.list_documents(job_id, only_review=True)
     assert n == 0

@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 if TYPE_CHECKING:
@@ -37,19 +37,17 @@ if TYPE_CHECKING:
 class ReviewPolicy:
     """Which documents a human must review.
 
-    ``mode="all"`` (default) queues every document. ``mode="flagged"`` queues only
-    documents that aren't a clean ``pass`` — i.e. a leak (``fail``), low fidelity
-    (``review``), a processing ``error``, OR a score below ``threshold`` — so a
-    hundreds-of-docs run only surfaces the ones that actually need eyes.
+    A document is queued when it isn't a clean ``pass`` — a leak (``fail``), low fidelity
+    or drift (``review``), or a processing ``error`` — OR when its overall ``score`` is
+    below ``score_threshold``. The fidelity gate is applied earlier (during scoring), so a
+    page below the fidelity threshold already surfaces here as a non-``pass`` verdict. Clean
+    high-scoring documents auto-approve, so a hundreds-of-docs run only surfaces real work.
     """
 
-    mode: str = "all"  # all | flagged
-    threshold: float = 0.0  # for 'flagged': also queue any pass below this score
+    score_threshold: float = 0.0  # also queue any pass scoring below this
 
     def needs_review(self, *, verdict: str, score: float) -> bool:
-        if self.mode != "flagged":
-            return True
-        return verdict != "pass" or score < self.threshold
+        return verdict != "pass" or score < self.score_threshold
 
 
 # --- Records ----------------------------------------------------------------
@@ -68,8 +66,11 @@ class PiiJob:
     total: int
     completed: int
     created_at: str
-    review_mode: str = "all"
-    review_threshold: float = 0.0
+    # Per-job review thresholds (set at launch): a page below fidelity_threshold flips to
+    # "review"; a document scoring below score_threshold is queued for a human. Either one
+    # below its bar → human review.
+    fidelity_threshold: float = 0.85
+    score_threshold: float = 0.85
 
 
 @dataclass
@@ -114,6 +115,13 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
+def _from_row(cls: Any, raw: dict[str, Any]) -> Any:
+    """Build a record from a stored JSON dict, ignoring unknown/legacy keys so old
+    objects survive a schema change (e.g. a renamed/removed field) instead of raising."""
+    known = {f.name for f in fields(cls)}
+    return cls(**{k: v for k, v in raw.items() if k in known})
+
+
 _VERDICT_ORDER = {"fail": 3, "error": 3, "review": 2, "pass": 1}
 
 
@@ -150,7 +158,7 @@ class PiiResultStore(Protocol):
 
     def create_job(
         self, *, dataset: str, source_uri: str, output_uri: str, pii_types: list[str],
-        total: int, review_mode: str = "all", review_threshold: float = 0.0,
+        total: int, fidelity_threshold: float = 0.85, score_threshold: float = 0.85,
     ) -> str: ...
     def get_job(self, job_id: str) -> PiiJob | None: ...
     def list_jobs(self) -> list[PiiJob]: ...
@@ -191,13 +199,13 @@ class InMemoryPiiResultStore:
 
     def create_job(
         self, *, dataset: str, source_uri: str, output_uri: str, pii_types: list[str],
-        total: int, review_mode: str = "all", review_threshold: float = 0.0,
+        total: int, fidelity_threshold: float = 0.85, score_threshold: float = 0.85,
     ) -> str:
         job_id = uuid.uuid4().hex[:12]
         self._jobs[job_id] = PiiJob(
             job_id=job_id, dataset=dataset, source_uri=source_uri, output_uri=output_uri,
             pii_types=pii_types, status="running", total=total, completed=0,
-            created_at=_now(), review_mode=review_mode, review_threshold=review_threshold,
+            created_at=_now(), fidelity_threshold=fidelity_threshold, score_threshold=score_threshold,
         )
         self._docs[job_id] = {}
         return job_id
@@ -340,13 +348,13 @@ class GcsPiiResultStore:
     # -- jobs --
     def create_job(
         self, *, dataset: str, source_uri: str, output_uri: str, pii_types: list[str],
-        total: int, review_mode: str = "all", review_threshold: float = 0.0,
+        total: int, fidelity_threshold: float = 0.85, score_threshold: float = 0.85,
     ) -> str:
         job_id = uuid.uuid4().hex[:12]
         job = PiiJob(
             job_id=job_id, dataset=dataset, source_uri=source_uri, output_uri=output_uri,
             pii_types=pii_types, status="running", total=total, completed=0,
-            created_at=_now(), review_mode=review_mode, review_threshold=review_threshold,
+            created_at=_now(), fidelity_threshold=fidelity_threshold, score_threshold=score_threshold,
         )
         self._write_json(f"{self._job_dir(job_id)}/job.json", asdict(job))
         return job_id
@@ -358,7 +366,7 @@ class GcsPiiResultStore:
         raw = self._read_json(f"{self._job_dir(job_id)}/job.json")
         if raw is None:
             return None
-        job = PiiJob(**raw)
+        job = _from_row(PiiJob, raw)
         job.completed = job.total if job.status == "done" else self._count_results(job_id)
         return job
 
@@ -368,7 +376,7 @@ class GcsPiiResultStore:
             if uri.endswith("/job.json"):
                 raw = self._read_json(uri)
                 if raw:
-                    job = PiiJob(**raw)
+                    job = _from_row(PiiJob, raw)
                     # `completed` is never persisted (always 0 in job.json) — recompute it
                     # live, exactly as get_job does, so the job list shows real progress.
                     job.completed = (
@@ -424,7 +432,7 @@ class GcsPiiResultStore:
                 continue
             raw = self._read_json(uri)
             if raw:
-                doc = PiiDoc(**raw)
+                doc = _from_row(PiiDoc, raw)
                 self._doc_cache[uri] = (gen, doc)
                 docs.append(doc)
         return docs
@@ -443,7 +451,7 @@ class GcsPiiResultStore:
 
     def get_document(self, job_id: str, document_id: str) -> PiiDoc | None:
         raw = self._read_json(f"{self._job_dir(job_id)}/results/{document_id}.json")
-        return PiiDoc(**raw) if raw else None
+        return _from_row(PiiDoc, raw) if raw else None
 
     def set_validation(
         self, job_id: str, document_id: str, *, status: str, note: str,

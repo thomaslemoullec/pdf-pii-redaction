@@ -82,7 +82,7 @@
     <thead><tr>
       {{ th('document', 'Document') }}<th>Sens.</th>{{ th('pages', 'Pages') }}
       {{ th('verdict', 'AI verdict') }}{{ th('score', 'Score') }}{{ th('time', 'Time') }}
-      {{ th('review', 'Review?') }}{{ th('validation', 'Human validation') }}<th></th>
+      {{ th('validation', 'Human validation') }}<th></th>
     </tr></thead>
     <tbody>
     {% for d in documents %}
@@ -93,7 +93,6 @@
         <td>{% if d.rerunning %}<span class="badge warn"><span class="step-icon active" style="font-size:11px">◐</span> processing</span>{% else %}<span class="badge {{ 'ok' if d.verdict == 'pass' else ('warn' if d.verdict == 'review' else 'bad') }}">{{ d.verdict }}</span>{% endif %}</td>
         <td>{{ '%.2f'|format(d.score) if d.verdict != 'error' else '—' }}</td>
         <td class="small">{{ '%.1f'|format(d.processing_seconds) ~ 's' if d.processing_seconds else '—' }}</td>
-        <td class="small">{% if d.needs_review %}<span class="badge warn">review</span>{% else %}<span class="muted">auto</span>{% endif %}</td>
         <td>
           {% if d.validation_status == 'validated' %}<span class="badge ok">validated</span>
           {% elif d.validation_status == 'rejected' %}<span class="badge bad">rejected</span>

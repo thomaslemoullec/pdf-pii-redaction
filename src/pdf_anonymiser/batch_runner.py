@@ -25,10 +25,15 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - deployed f
     parser.add_argument("--label", default=os.environ.get("PII_LABEL", "documents"))
     parser.add_argument("--pii-types", default=os.environ.get("PII_TYPES", ""))
     parser.add_argument("--limit", type=int, default=int(os.environ.get("PII_LIMIT", "0")))
-    parser.add_argument("--review-mode", default=os.environ.get("PII_REVIEW_MODE", "all"))
     parser.add_argument(
-        "--review-threshold", type=float,
-        default=float(os.environ.get("PII_REVIEW_THRESHOLD", "0")),
+        "--fidelity-threshold", type=float,
+        default=float(os.environ.get("FIDELITY_THRESHOLD", "0.85")),
+        help="page fidelity below this → 'review' (layout/content drift)",
+    )
+    parser.add_argument(
+        "--score-threshold", type=float,
+        default=float(os.environ.get("PII_SCORE_THRESHOLD", "0.85")),
+        help="document overall score below this → queued for human review",
     )
     parser.add_argument("--dpi", type=int, default=int(os.environ.get("RENDER_DPI", "150")))
     parser.add_argument(
@@ -54,9 +59,12 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - deployed f
     index = int(os.environ.get("CLOUD_RUN_TASK_INDEX", "0"))
     count = int(os.environ.get("CLOUD_RUN_TASK_COUNT", "1"))
 
+    from dataclasses import replace
+
     pii_types = [PiiType(t) for t in args.pii_types.split(",") if t.strip()] or None
-    policy = ReviewPolicy(mode=args.review_mode, threshold=args.review_threshold)
-    settings = Settings.from_env()
+    policy = ReviewPolicy(score_threshold=args.score_threshold)
+    # Per-job fidelity gate overrides the env default (the launch slider sets it).
+    settings = replace(Settings.from_env(), fidelity_threshold=args.fidelity_threshold)
     object_store = GcsObjectStore()
     store = result_store_from_env(object_store)
     review = GeminiPiiReviewService(settings, pii_types=pii_types)

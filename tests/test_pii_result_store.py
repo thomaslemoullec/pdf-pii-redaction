@@ -34,21 +34,18 @@ def store(request):  # type: ignore[no-untyped-def]
 # --- ReviewPolicy (pure) ----------------------------------------------------
 
 
-def test_review_policy_all_queues_everything() -> None:
-    p = ReviewPolicy(mode="all")
-    assert p.needs_review(verdict="pass", score=1.0)
-    assert p.needs_review(verdict="fail", score=0.2)
-
-
-def test_review_policy_flagged_only_non_pass_or_below_threshold() -> None:
-    p = ReviewPolicy(mode="flagged", threshold=0.0)
+def test_review_policy_non_pass_always_queued() -> None:
+    p = ReviewPolicy(score_threshold=0.0)
     assert not p.needs_review(verdict="pass", score=0.99)  # clean pass → skip
-    assert p.needs_review(verdict="review", score=0.99)    # low fidelity → queue
+    assert p.needs_review(verdict="review", score=0.99)    # low fidelity / drift → queue
     assert p.needs_review(verdict="fail", score=0.99)      # leak → queue
-    # with a score threshold, a low-but-passing score is also queued
-    p2 = ReviewPolicy(mode="flagged", threshold=0.95)
-    assert p2.needs_review(verdict="pass", score=0.90)
-    assert not p2.needs_review(verdict="pass", score=0.97)
+    assert p.needs_review(verdict="error", score=0.0)      # processing error → queue
+
+
+def test_review_policy_score_threshold_queues_low_passes() -> None:
+    p = ReviewPolicy(score_threshold=0.95)
+    assert p.needs_review(verdict="pass", score=0.90)      # below the bar → queue
+    assert not p.needs_review(verdict="pass", score=0.97)  # above the bar → skip
 
 
 # --- store CRUD (both implementations) --------------------------------------

@@ -178,7 +178,7 @@ class GeminiPiiReviewService:
         leak_tool = DlpLeakTool(self._dlp_carryover) if self._dlp_carryover is not None else NoLeakTool()
         self._agent = RedactionAgent(
             synthesize=self._anonymizer,
-            metrics=MetricsTool(self._analyzer),
+            metrics=MetricsTool(self._analyzer, fidelity_threshold=settings.fidelity_threshold),
             judge=JudgeTool(self._judge),
             leak_tool=leak_tool,
         )

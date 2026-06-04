@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}PDF Anonymiser{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="icon" href="{{ brand_logo }}">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://unpkg.com/htmx.org@2.0.3" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">
+      <img class="brand-mark" src="{{ brand_logo }}" alt="PDF Anonymiser">
+      <span class="brand-name">PDF&nbsp;Anonymiser</span>
+      <span class="brand-sub">scan · synthesise · review</span>
+    </a>
+    <nav class="crumbs">{% block crumbs %}{% endblock %}</nav>
+    <a class="navlink nav-gap" href="/">New&nbsp;job</a>
+  </header>
+  <main class="content">{% block content %}{% endblock %}</main>
+</body>
+</html>

@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% block title %}{{ doc.document_id }} · validate{% endblock %}
+{% block crumbs %}<a href="/">Home</a> / <a href="/jobs/{{ doc.job_id }}">job</a> / <span class="mono">{{ doc.document_id }}</span>{% endblock %}
+{% block content %}
+{% macro vbadge(v) %}<span class="badge {{ 'ok' if v == 'pass' else ('warn' if v == 'review' else 'bad') }}">{{ v }}</span>{% endmacro %}
+
+<header class="doc-head">
+  <div class="doc-head-row">
+    <h1 class="doc-title"><span class="doc-ico">📄</span><span class="mono">{{ doc.document_id }}</span></h1>
+    <div class="doc-badges">
+      <span class="kv-badge"><span class="kv-k">AI verdict</span>{% if doc.rerunning %}<span class="badge warn"><span class="step-icon active" style="font-size:11px">◐</span> processing</span>{% else %}{{ vbadge(doc.verdict) }}{% endif %}</span>
+      <span class="kv-badge"><span class="kv-k">human validation</span>
+        {% if doc.validation_status == 'validated' %}<span class="badge ok">validated</span>
+        {% elif doc.validation_status == 'rejected' %}<span class="badge bad">rejected</span>
+        {% else %}<span class="badge">pending</span>{% endif %}
+      </span>
+    </div>
+  </div>
+  <div class="doc-flow">
+    <div class="flow-item"><span class="flow-label">source</span><code class="flow-path mono">{{ doc.source_uri }}</code></div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-item"><span class="flow-label">output</span><code class="flow-path mono">{{ doc.output_prefix or '(not written)' }}</code></div>
+  </div>
+  <div class="doc-chips">
+    <span class="chip"><span class="chip-k">routing</span> {{ routing_label(doc.routing) }}</span>
+    <span class="chip"><span class="chip-k">sensitivity</span> {{ doc.max_sensitivity or '—' }}</span>
+    <span class="chip"><span class="chip-k">pages</span> {{ summary.page_count }}</span>
+  </div>
+</header>
+
+{% if doc.rerunning or request.query_params.get('rerunning') %}
+<p class="banner ok"><span class="step-icon active" style="font-size:13px">◐</span> Re-processing this document… it can take a minute or two. This page refreshes automatically.</p>
+{% endif %}
+
+{% if doc.verdict == 'error' and not doc.rerunning %}
+<section class="panel">
+  <p class="banner bad">One or more pages failed to process. Any pages that succeeded are shown below and can still be reviewed.</p>
+  <div class="suggest-row" style="gap:.6rem;align-items:center">
+    <form method="post" action="/jobs/{{ doc.job_id }}/doc/{{ doc.document_id }}/rerun" style="display:inline">
+      <button class="btn primary" type="submit">↻ Relaunch this document</button>
+    </form>
+    <a class="btn" href="/jobs/{{ doc.job_id }}/review?exclude={{ doc.document_id }}">Skip → next ↦</a>
+    <span class="muted small">Relaunch re-processes just this document (intermittent errors like a 504 usually clear). Skip moves to the next one awaiting review.</span>
+  </div>
+</section>
+{% endif %}
+
+<section class="panel">
+  <h3>① Detection <span class="muted small">· input · what the scanners found (Gemini-vision ∪ Cloud DLP)</span></h3>
+  {% if summary.by_type_detector %}
+  <table class="grid kv">
+    <thead><tr><th>PII type</th><th>Count</th><th>Spotted by</th></tr></thead>
+    <tbody>
+      {% for t, per in summary.by_type_detector.items() %}
+      <tr>
+        <td class="mono">{{ t }}</td>
+        <td>{{ summary.by_type[t] }}</td>
+        <td>{% for d, n in per.items() %}<span class="chip"><b>{{ d }}</b> <span class="chip-sub">×{{ n }}</span></span> {% endfor %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="small muted">{{ summary.total_pii }} PII item(s) across {{ summary.page_count }} page(s) · detector totals: {% for d, n in summary.by_detector.items() %}<b>{{ d }}</b> ({{ n }}){% if not loop.last %} · {% endif %}{% endfor %}</p>
+  {% else %}<p class="muted">No PII detected.</p>{% endif %}
+</section>
+
+<section class="panel">
+  <h3>Human validation
+    {% if review_position and review_remaining %}<span class="muted small">· document {{ review_position }} of {{ review_remaining }} awaiting review</span>{% endif %}
+  </h3>
+  <form method="post" action="/jobs/{{ doc.job_id }}/doc/{{ doc.document_id }}/validate" class="stack">
+    <label>Note (why it's not valid, if rejecting)
+      <input class="input" name="note" value="{{ doc.note }}" placeholder="e.g. signature on p.2 still legible">
+    </label>
+    <div class="suggest-row">
+      <button class="btn primary" name="decision" value="validate" type="submit">✓ Validate &amp; next →</button>
+      <button class="btn" name="decision" value="reject" type="submit">✕ Reject &amp; next →</button>
+      <a class="navlink" href="/jobs/{{ doc.job_id }}/review?exclude={{ doc.document_id }}">Skip to next →</a>
+    </div>
+    <p class="muted small">Validate promotes the document to <span class="mono">validated/</span>; reject keeps it in <span class="mono">unvalidated/</span>. Either way you advance to the next document that needs review.</p>
+  </form>
+</section>
+
+{% for p in pages %}
+<section class="panel">
+  <h3>Page {{ p.page_no }} {{ vbadge(p.verdict) }}</h3>
+  {% if p.verdict == 'error' %}
+    <p class="banner bad small">⚠ This page failed to process: <span class="mono">{{ p.rationale or p.error or 'unknown error' }}</span></p>
+  {% else %}
+
+  {# --- one coherent verdict line that reconciles the value-check and the AI judge --- #}
+  {% set m_leak = (p.pii_leaked|default(0) > 0) or p.leaked_types or p.dlp_leaks %}
+  {% set j_removed = p.judge_all_removed|default(true) %}
+  {% set j_layout = p.judge_layout_ok|default(true) %}
+  {% set leak_types = (p.leaked_types or p.dlp_leaks or []) %}
+  <div class="page-verdict {{ 'ok' if p.verdict == 'pass' else ('warn' if p.verdict == 'review' else 'bad') }}">
+    <b>Page verdict: {{ p.verdict }}</b> —
+    {% if p.verdict == 'fail' %}
+      {% if m_leak and j_removed %}
+        the exact-value check found a real value still present ({{ leak_types|join(', ') }}) that the visual AI judge did not flag. The value match is authoritative, so the page fails.
+      {% elif m_leak %}
+        real PII still present in the output: {{ leak_types|join(', ') }}.
+      {% else %}
+        the AI judge reported PII still visible in the output.
+      {% endif %}
+    {% elif p.verdict == 'review' %}
+      {% if not j_removed and not m_leak %}
+        the AI judge wasn't fully sure every value was replaced, but the exact-value check found nothing surviving — sent to a human to confirm.
+      {% elif not j_layout %}
+        layout/fidelity changed enough to warrant a human look (no PII leak detected).
+      {% else %}
+        below the auto-pass bar — sent to a human to confirm.
+      {% endif %}
+    {% else %}
+      all checks agree: no real PII value survived and the layout was preserved.
+    {% endif %}
+  </div>
+
+  {% if p.by_type_detector %}
+  <div class="chip-grid redacted-list">
+    <span class="small muted">detected:</span>
+    {% for t, per in p.by_type_detector.items() %}<span class="chip"><span class="mono">{{ t }}</span> <span class="chip-sub">{% for d in per %}{{ d }}{% if not loop.last %}+{% endif %}{% endfor %}</span></span>{% endfor %}
+  </div>
+  {% endif %}
+
+  {% if p.get('score') is not none %}
+  <div class="judge">
+    <p class="small muted evidence-lbl">Evidence (the two independent signals behind the verdict above):</p>
+    <div class="metrics-row">
+      <span class="metric"><b>{{ '%.2f'|format(p.get('score')) }}</b> <span class="muted small">score</span></span>
+      <span class="metric"><b class="{{ 'bad' if (p.pii_leaked|default(0) > 0) else '' }}">{{ p.pii_total|default(0) - p.pii_leaked|default(0) }}/{{ p.pii_total|default(0) }}</b> <span class="muted small">values replaced (exact-value check)</span></span>
+      <span class="metric"><b>{{ '%.0f'|format((p.fidelity|default(1)) * 100) }}%</b> <span class="muted small">fidelity ({{ p.nonpii_changed|default(0) }} changed)</span></span>
+    </div>
+    <div class="judge-flags small">
+      <span class="muted">AI visual judge:</span>
+      <span class="flag {{ 'ok' if j_removed else 'warn' }}">{{ '✓' if j_removed else '?' }} all PII replaced</span>
+      <span class="flag {{ 'ok' if j_layout else 'warn' }}">{{ '✓' if j_layout else '?' }} layout preserved</span>
+    </div>
+    {% if p.rationale %}<p class="small"><span class="muted">judge rationale:</span> {{ p.rationale }}</p>{% endif %}
+    {% if p.dlp_leaks %}<p class="banner bad small">⚠ Cloud DLP confirmed a real source value survived in the output: <b>{{ p.dlp_leaks|join(', ') }}</b></p>{% endif %}
+  </div>
+  {% endif %}
+
+  {% if p.anon or p.source %}
+  <div class="pii-pair">
+    {% if p.source %}<figure><figcaption class="muted small">Source (original) · click to zoom</figcaption><img class="zoomable" src="{{ p.source }}" alt="source page {{ p.page_no }}"></figure>{% endif %}
+    {% if p.anon %}<figure><figcaption class="muted small">Synthetic (PII-free) · click to zoom</figcaption><img class="zoomable" src="{{ p.anon }}" alt="synthetic page {{ p.page_no }}"></figure>{% endif %}
+  </div>
+  {% else %}<p class="muted small">Preview unavailable.</p>{% endif %}
+  {% endif %}
+</section>
+{% endfor %}
+
+{# Click-to-zoom lightbox: any .zoomable image opens here at full resolution. #}
+<div id="lightbox" class="lightbox" title="click to close">
+  <img id="lightbox-img" src="" alt="zoomed page">
+</div>
+<script>
+(function () {
+  var lb = document.getElementById('lightbox');
+  var lbImg = document.getElementById('lightbox-img');
+  document.addEventListener('click', function (e) {
+    var img = e.target.closest && e.target.closest('.zoomable');
+    if (img) { lbImg.src = img.src; lb.classList.add('on'); return; }
+    if (e.target === lb || e.target === lbImg) { lb.classList.remove('on'); }
+  });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') lb.classList.remove('on'); });
+})();
+</script>
+{% if doc.rerunning %}<script>setTimeout(function () { location.reload(); }, 20000);</script>{% endif %}
+{% endblock %}

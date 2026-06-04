@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}PDF Anonymiser{% endblock %}
+{% block crumbs %}<span>New job</span>{% endblock %}
+{% block content %}
+<div class="pkg-head">
+  <h1>Anonymise a folder of PDFs</h1>
+  <div class="pkg-meta muted">Point at a Cloud Storage prefix of PDFs → parallel synthetic anonymisation → human review → a <span class="mono">validated/</span> + <span class="mono">unvalidated/</span> PII-free output set.</div>
+</div>
+
+<section class="panel">
+  <h3>New job</h3>
+  <form method="post" action="/jobs" class="stack">
+    <label>Source folder <span class="muted small">(gs:// prefix of the PDFs to anonymise)</span>
+      <input class="input" name="source" placeholder="gs://my-bucket/incoming/" required>
+    </label>
+    <label>Output location <span class="muted small">(PII-free pages are written under here)</span>
+      <input class="input" name="output" placeholder="gs://my-bucket/anonymised" required>
+    </label>
+    <label>Job label <span class="muted small">(a name for this run)</span>
+      <input class="input" name="label" value="documents">
+    </label>
+
+    <label>Limit <span class="muted small">(optional — process only the first N documents; blank/0 = the whole folder)</span>
+      <input class="input input-tiny" type="number" name="limit" min="0" placeholder="0" value="0">
+    </label>
+
+    <fieldset class="review-policy">
+      <legend>Which documents need human review?</legend>
+      <label class="radio"><input type="radio" name="review_mode" value="all" checked> <b>All</b> <span class="muted small">— queue every document (default)</span></label>
+      <label class="radio"><input type="radio" name="review_mode" value="flagged"> <b>Only flagged</b> <span class="muted small">— a leak, low fidelity, an error, or score below</span>
+        <input class="input input-tiny" type="number" name="review_threshold" min="0" max="1" step="0.01" value="0" title="score threshold"></label>
+      <p class="muted small">Auto-approved documents skip the queue (useful for hundreds of docs) — you can still see them with the "all" filter.</p>
+    </fieldset>
+
+    <label>Describe the documents or the PII you expect <span class="muted small">(optional — an assistant turns this into a PII-type scope; leave blank to scan for everything)</span>
+      <textarea class="input" name="description" rows="2" placeholder="e.g. account-opening forms — names, IBANs, dates of birth, handwritten signatures"></textarea>
+    </label>
+    <div class="suggest-row">
+      <button type="button" class="btn" hx-post="/jobs/suggest" hx-include="[name='description']" hx-target="#type-picker" hx-swap="innerHTML">
+        Suggest PII types from the description
+      </button>
+    </div>
+
+    <div id="type-picker">
+      {% include "_type_picker.html" %}
+    </div>
+
+    <button class="btn primary" type="submit">Launch job</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h3>Jobs</h3>
+  {% if jobs %}
+  <table class="grid">
+    <thead><tr><th>Created</th><th>Label</th><th>Source</th><th>Status</th><th>Progress</th><th></th></tr></thead>
+    <tbody>
+    {% for j in jobs %}
+      <tr>
+        <td class="small muted">{{ j.created_at[:19] }}</td>
+        <td>{{ j.dataset }}</td>
+        <td class="mono small">{{ j.source_uri }}</td>
+        {% set s = statuses.get(j.job_id, (j.status, '')) %}
+        <td><span class="badge {{ s[1] }}">{{ s[0] }}</span></td>
+        <td>{{ j.completed }}/{{ j.total }}</td>
+        <td><a class="navlink" href="/jobs/{{ j.job_id }}">open →</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">No jobs yet.</p>{% endif %}
+</section>
+{% endblock %}

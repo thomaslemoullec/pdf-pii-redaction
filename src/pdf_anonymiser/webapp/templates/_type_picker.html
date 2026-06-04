@@ -1,0 +1,17 @@
+{# PII type checkboxes. After describing the documents, the planner pre-checks the
+   suggested types. With no selection at all, the job runs the full wishlist (DLP
+   unscoped — scan for everything). #}
+{% if error is defined and error %}
+<p class="banner bad small">Couldn't plan types: {{ error }} — you can still pick them manually.</p>
+{% elif described is defined and described %}
+{% if suggested %}<p class="small muted">Suggested from your description — adjust as needed. Leave all unchecked to scan for everything.</p>
+{% else %}<p class="small muted">No specific types inferred — leaving all unchecked scans for everything.</p>{% endif %}
+{% endif %}
+<div class="chip-grid">
+  {% for t in pii_types %}
+  <label class="chip">
+    <input type="checkbox" name="types" value="{{ t }}" {% if suggested is defined and t in suggested %}checked{% endif %}>
+    <span class="dot"></span><span class="mono">{{ t }}</span>
+  </label>
+  {% endfor %}
+</div>

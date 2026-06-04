@@ -1,0 +1,29 @@
+# Copy to dev.tfvars and fill in. dev.tfvars is gitignored.
+project_id = "my-gcp-project"
+region     = "europe-west3"
+environment = "dev"
+
+# Container image (build + push first — see the Makefile `image` target).
+image = "europe-west3-docker.pkg.dev/my-gcp-project/pdf-anonymiser/app:latest"
+
+# Models + location. Tip: `make models` shows what your project can call and prints a
+# ready-to-paste block; `make models-write` fills these in for you.
+gemini_location = "europe-west4"
+# vision_model  = "gemini-2.5-pro"          # uncomment to override the defaults
+# planner_model = "gemini-2.5-flash"
+# image_model   = "gemini-2.5-flash-image"
+
+# Detection / leak-checking with Cloud DLP (both default on; need roles/dlp.user).
+# pii_use_dlp        = true   # union DLP infoTypes into the input scan
+# pii_dlp_leak_check = true   # certified value-carryover leak check on the output
+
+# Demo only — leave false for any deployment with real documents.
+ui_allow_unauthenticated = false
+
+# Identity-Aware Proxy: protect the UI directly (no load balancer). Strongly
+# recommended for real documents. Keep ui_allow_unauthenticated=false when this is on.
+enable_iap  = true
+iap_members = [
+  # "group:pdf-reviewers@yourdomain.com",   # recommended: manage people via a group
+  # "user:alice@yourdomain.com",
+]

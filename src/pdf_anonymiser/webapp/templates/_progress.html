@@ -1,0 +1,162 @@
+{# Self-polling progress + (once done) the run report. Polls every 10s while the job is
+   running AND live refresh is on (the user can pause it). #}
+{% set running = job.status not in ('done', 'error') %}
+{# keep the page live while documents are still being re-processed, even after the job is done #}
+{% set active = running or rerunning_count %}
+{# qbase carries the active filters so sort/pagination links preserve them. #}
+{% set qbase = 'size=' ~ size ~ ('&review=1' if only_review else '') ~ ('&verdict=' ~ f_verdict if f_verdict else '') ~ ('&validation=' ~ f_validation if f_validation else '') ~ ('&live=0' if not live else '') %}
+{% set qnolive = 'sort=' ~ sort ~ '&dir=' ~ dir ~ '&page=' ~ page ~ '&size=' ~ size ~ ('&review=1' if only_review else '') ~ ('&verdict=' ~ f_verdict if f_verdict else '') ~ ('&validation=' ~ f_validation if f_validation else '') %}
+{% set poll = '/jobs/' ~ job.job_id ~ '/progress?sort=' ~ sort ~ '&dir=' ~ dir ~ '&page=' ~ page ~ '&' ~ qbase %}
+<div id="batch-progress"
+     {% if active and live %}hx-get="{{ poll }}" hx-trigger="every 10s" hx-swap="outerHTML"{% endif %}>
+
+<section class="panel">
+  <div class="suggest-row" style="justify-content:space-between;align-items:center">
+    <h3 style="margin:0">Progress <span class="muted small">· review each document, then validate or reject</span></h3>
+    {% if review_pending %}<a class="btn primary" href="/jobs/{{ job.job_id }}/review">▶ Start review ({{ review_pending }} document{{ 's' if review_pending != 1 else '' }}) →</a>{% endif %}
+  </div>
+
+  <div class="batch-status">
+    <span class="badge {{ status_css }}">{{ status_label }}</span>
+    <span class="mono">{{ done }}/{{ job.total }}</span> documents
+    {% if rerunning_count %}<span class="badge warn"><span class="step-icon active" style="font-size:11px">◐</span> {{ rerunning_count }} re-processing</span>{% endif %}
+    <span class="spacer"></span>
+    {% if active %}
+      {% if live %}<span class="step-icon active" style="font-size:13px" title="auto-refreshing every 10s">◐</span>{% endif %}
+      <a class="switch {{ 'on' if live else '' }}" href="?{{ qnolive }}&live={{ '0' if live else '1' }}" title="Auto-refresh the dashboard every 10s">
+        <span class="switch-track"><span class="switch-thumb"></span></span>
+        <span class="switch-label">Live refresh</span>
+      </a>
+    {% endif %}
+    <button class="btn btn-sm" hx-get="{{ poll }}" hx-target="#batch-progress" hx-swap="outerHTML">↻ Refresh now</button>
+  </div>
+  <div class="progressbar"><div class="progressbar-fill" style="width: {{ pct }}%"></div></div>
+
+  {% if stats %}
+  <div class="stat-cards">
+    <div class="stat-card"><div class="stat-num ok">{{ stats.verdicts.pass }}</div><div class="stat-lbl">pass</div></div>
+    <div class="stat-card"><div class="stat-num warn">{{ stats.verdicts.review }}</div><div class="stat-lbl">review</div></div>
+    <div class="stat-card"><div class="stat-num bad">{{ stats.verdicts.fail + stats.verdicts.error }}</div><div class="stat-lbl">fail / error</div></div>
+    <div class="stat-card"><div class="stat-num">{{ '%.2f'|format(stats.avg_score) if stats.avg_score is not none else '—' }}</div><div class="stat-lbl">avg score</div></div>
+    <div class="stat-card"><div class="stat-num">{{ review_count }}</div><div class="stat-lbl">to review</div></div>
+    <div class="stat-card"><div class="stat-num ok">{{ stats.validation.validated }}</div><div class="stat-lbl">validated</div></div>
+  </div>
+  {% endif %}
+
+  {# --- filters: AI verdict + human validation (independent, toggle to clear) --- #}
+  {% macro vfilter(val, label, count) %}
+    {% set active = (f_verdict == val) %}
+    <a class="pill {{ 'on' if active else '' }}" href="?sort={{ sort }}&dir={{ dir }}&page=1&size={{ size }}{{ '&review=1' if only_review else '' }}{{ '&validation=' ~ f_validation if f_validation else '' }}{{ '&live=0' if not live else '' }}{{ ('&verdict=' ~ val) if (val and not active) else '' }}">{{ label }}{% if count is not none %} <span class="chip-sub">{{ count }}</span>{% endif %}</a>
+  {% endmacro %}
+  {% macro valfilter(val, label, count) %}
+    {% set active = (f_validation == val) %}
+    <a class="pill {{ 'on' if active else '' }}" href="?sort={{ sort }}&dir={{ dir }}&page=1&size={{ size }}{{ '&review=1' if only_review else '' }}{{ '&verdict=' ~ f_verdict if f_verdict else '' }}{{ '&live=0' if not live else '' }}{{ ('&validation=' ~ val) if (val and not active) else '' }}">{{ label }}{% if count is not none %} <span class="chip-sub">{{ count }}</span>{% endif %}</a>
+  {% endmacro %}
+  <div class="filter-row">
+    <span class="filter-label small muted">AI verdict</span>
+    {{ vfilter('', 'all', none) }}{{ vfilter('pass', 'pass', stats.verdicts.pass) }}{{ vfilter('review', 'review', stats.verdicts.review) }}{{ vfilter('fail', 'fail', stats.verdicts.fail) }}{{ vfilter('error', 'error', stats.verdicts.error) }}
+  </div>
+  <div class="filter-row">
+    <span class="filter-label small muted">Human validation</span>
+    {{ valfilter('', 'all', none) }}{{ valfilter('pending', 'pending', stats.validation.pending) }}{{ valfilter('validated', 'validated', stats.validation.validated) }}{{ valfilter('rejected', 'rejected', stats.validation.rejected) }}
+    <span class="filter-sep">·</span>
+    <a class="pill {{ 'on' if only_review else '' }}" href="?sort={{ sort }}&dir={{ dir }}&page=1&size={{ size }}{{ '&verdict=' ~ f_verdict if f_verdict else '' }}{{ '&validation=' ~ f_validation if f_validation else '' }}{{ '&live=0' if not live else '' }}{{ '' if only_review else '&review=1' }}">needs review <span class="chip-sub">{{ review_count }}</span></a>
+  </div>
+
+  {% if error_count %}
+  <div class="suggest-row" style="margin:8px 0 2px">
+    <form method="post" action="/jobs/{{ job.job_id }}/rerun-errors" style="display:inline"
+          onsubmit="return confirm('Relaunch all {{ error_count }} error document(s)? Each is re-processed individually.')">
+      <button class="btn" type="submit">↻ Relaunch all {{ error_count }} error document{{ 's' if error_count != 1 else '' }}</button>
+    </form>
+    <span class="muted small">Re-processes only the documents that errored (e.g. transient 504s) — the rest are untouched.</span>
+  </div>
+  {% endif %}
+
+  {% macro th(col, label) %}
+    <th><a class="sortlink" href="?sort={{ col }}&dir={{ 'desc' if (sort == col and dir == 'asc') else 'asc' }}&page=1&{{ qbase }}">{{ label }}{% if sort == col %} {{ '▲' if dir == 'asc' else '▼' }}{% endif %}</a></th>
+  {% endmacro %}
+
+  {% if documents %}
+  <table class="grid batch-docs">
+    <thead><tr>
+      {{ th('document', 'Document') }}<th>Sens.</th>{{ th('pages', 'Pages') }}
+      {{ th('verdict', 'AI verdict') }}{{ th('score', 'Score') }}{{ th('time', 'Time') }}
+      {{ th('review', 'Review?') }}{{ th('validation', 'Human validation') }}<th></th>
+    </tr></thead>
+    <tbody>
+    {% for d in documents %}
+      <tr>
+        <td class="mono">{{ d.document_id }}</td>
+        <td class="small">{{ d.max_sensitivity or '—' }}</td>
+        <td class="small">{{ d.pages|length if d.verdict != 'error' else '—' }}</td>
+        <td>{% if d.rerunning %}<span class="badge warn"><span class="step-icon active" style="font-size:11px">◐</span> processing</span>{% else %}<span class="badge {{ 'ok' if d.verdict == 'pass' else ('warn' if d.verdict == 'review' else 'bad') }}">{{ d.verdict }}</span>{% endif %}</td>
+        <td>{{ '%.2f'|format(d.score) if d.verdict != 'error' else '—' }}</td>
+        <td class="small">{{ '%.1f'|format(d.processing_seconds) ~ 's' if d.processing_seconds else '—' }}</td>
+        <td class="small">{% if d.needs_review %}<span class="badge warn">review</span>{% else %}<span class="muted">auto</span>{% endif %}</td>
+        <td>
+          {% if d.validation_status == 'validated' %}<span class="badge ok">validated</span>
+          {% elif d.validation_status == 'rejected' %}<span class="badge bad">rejected</span>
+          {% else %}<span class="badge">pending</span>{% endif %}
+        </td>
+        <td><a class="navlink" href="/jobs/{{ job.job_id }}/doc/{{ d.document_id }}">review →</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if pages > 1 %}
+  <div class="pager small">
+    {% if page > 1 %}<a class="btn btn-sm" href="?sort={{ sort }}&dir={{ dir }}&page={{ page - 1 }}&{{ qbase }}">← prev</a>{% endif %}
+    <span class="muted">page {{ page }} of {{ pages }} · {{ filtered_total }} docs</span>
+    {% if page < pages %}<a class="btn btn-sm" href="?sort={{ sort }}&dir={{ dir }}&page={{ page + 1 }}&{{ qbase }}">next →</a>{% endif %}
+  </div>
+  {% endif %}
+  {% else %}<p class="muted">{{ 'No documents match this filter.' if (only_review or f_verdict or f_validation) else 'No documents yet — the worker tasks are starting…' }}</p>{% endif %}
+</section>
+
+{% if not running %}
+{# === Run report — shown in place once the job is done ====================== #}
+<div class="report-cols">
+  <section class="panel">
+    <h3>PII handled</h3>
+    <div class="stat-cards">
+      <div class="stat-card"><div class="stat-num">{{ pii_scanned }}</div><div class="stat-lbl">detected</div></div>
+      <div class="stat-card"><div class="stat-num ok">{{ pii_redacted }}</div><div class="stat-lbl">redacted</div></div>
+      <div class="stat-card"><div class="stat-num bad">{{ pii_leaked }}</div><div class="stat-lbl">leaked</div></div>
+    </div>
+    {% if by_type %}
+    <p class="small muted">by type: {% for t, n in by_type.items() %}<span class="chip"><span class="mono">{{ t }}</span> <span class="chip-sub">×{{ n }}</span></span> {% endfor %}</p>
+    <p class="small muted">by detector: {% for d, n in by_detector.items() %}<b>{{ d }}</b> ({{ n }}){% if not loop.last %} · {% endif %}{% endfor %}</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <h3>Time</h3>
+    <table class="grid kv">
+      <tbody>
+        <tr><td>Pages processed</td><td>{{ page_count }} across {{ doc_count }} documents</td></tr>
+        <tr><td>Total elapsed (start → finish)</td><td>{{ '%.0f'|format(wall_seconds) ~ ' s' if wall_seconds is not none else '—' }}</td></tr>
+        <tr><td>Total compute time</td><td>{{ '%.0f'|format(total_proc_seconds) }} s</td></tr>
+        <tr><td>Avg per document</td><td>{{ '%.1f'|format(avg_proc_seconds) }} s</td></tr>
+      </tbody>
+    </table>
+    <p class="small muted">Compute time is summed across documents; total elapsed is lower because documents run in parallel.</p>
+  </section>
+</div>
+
+<section class="panel">
+  <h3>Estimated cost <span class="muted small">· public list prices · rough estimate, not a bill · click a ? for how each line is counted</span></h3>
+  <table class="grid kv">
+    <thead><tr><th>Component</th><th>Calls</th><th>Est. USD</th></tr></thead>
+    <tbody>
+      <tr><td>Gemini Pro vision <span class="help" tabindex="0" data-tip="2 calls per page (PII scan + reading the source), plus 2 per synthesis attempt (transcribe the new page + the LLM judge). = pages×2 + attempts×2">?</span></td><td>{{ cost.vision_calls }}</td><td>${{ '%.3f'|format(cost.vision_cost) }}</td></tr>
+      <tr><td>Gemini Flash planner <span class="help" tabindex="0" data-tip="One Flash call per job: turns your free-text description into the PII-type scope.">?</span></td><td>{{ cost.planner_calls }}</td><td>${{ '%.3f'|format(cost.planner_cost) }}</td></tr>
+      <tr><td>Image generation (synthetic page) <span class="help" tabindex="0" data-tip="One page regeneration per synthesis attempt — a page that needed one retry counts 2.">?</span></td><td>{{ cost.image_gens }}</td><td>${{ '%.3f'|format(cost.image_cost) }}</td></tr>
+      <tr><td>Cloud DLP inspect <span class="help" tabindex="0" data-tip="Input PII scan (1 per page) + the certified value-carryover leak check (the source page once + 1 per synthesis attempt).">?</span></td><td>{{ cost.dlp_inspects }}</td><td>${{ '%.3f'|format(cost.dlp_cost) }}</td></tr>
+      <tr class="total-row"><td><b>Total</b> <span class="muted small">· {{ attempts_total }} synthesis attempts across all pages <span class="help" tabindex="0" data-tip="One 'attempt' = anonymise the page once + judge it. A clean page = 1; a page that needed a retry = 2. This is the main cost driver.">?</span></span></td><td></td><td><b>${{ '%.3f'|format(cost.total) }}</b></td></tr>
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+</div>

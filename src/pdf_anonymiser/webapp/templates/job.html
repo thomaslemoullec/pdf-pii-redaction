@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}{{ job.dataset }} · PDF Anonymiser{% endblock %}
+{% block crumbs %}<a href="/">Home</a> / <span class="mono">{{ job.dataset }}</span>{% endblock %}
+{% block content %}
+<div class="pkg-head">
+  <h1>{{ job.dataset }}</h1>
+  <div class="pkg-meta muted">
+    <span class="mono">{{ job.source_uri }}</span> → <span class="mono">{{ job.output_uri }}</span>
+    {% if job.pii_types %}· scoped to {{ job.pii_types|join(', ') }}{% else %}· all PII types{% endif %}
+    {% if logs_url %}· <a class="navlink" href="{{ logs_url }}" target="_blank" rel="noopener">stream logs ↗</a>{% endif %}
+    {% if dashboard_url %}· <a class="navlink" href="{{ dashboard_url }}" target="_blank" rel="noopener">metrics dashboard ↗</a>{% endif %}
+  </div>
+</div>
+
+{% if request.query_params.get('reviewed') %}
+<p class="banner ok">Review complete — every document in the queue has a decision. 🎉</p>
+{% endif %}
+{% if request.query_params.get('relaunched') %}
+<p class="banner ok">Relaunching {{ request.query_params.get('relaunched') }} error document(s) — they now show as “processing” and will update automatically.</p>
+{% endif %}
+
+{% include "_progress.html" %}
+{% endblock %}

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="PDF Anonymiser">
+  <rect x="2" y="2" width="28" height="28" rx="6" fill="#1a73e8"/>
+  <rect x="9.5" y="8" width="13" height="16" rx="1.5" fill="#fff"/>
+  <rect x="12" y="11.5" width="8" height="1.6" rx="0.8" fill="#1a73e8"/>
+  <rect x="12" y="14.7" width="8" height="1.6" rx="0.8" fill="#9aa0a6"/>
+  <rect x="12" y="17.9" width="5.5" height="1.6" rx="0.8" fill="#1a73e8"/>
+  <circle cx="21.5" cy="20.5" r="5" fill="#202124"/>
+  <path d="M21.5 17.6a2.9 2.9 0 0 1 2.9 2.9v.7h-5.8v-.7a2.9 2.9 0 0 1 2.9-2.9z" fill="#fff"/>
+  <circle cx="21.5" cy="16.6" r="1.7" fill="#fff"/>
+</svg>

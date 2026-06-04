@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Terraform
+infra/.terraform/
+infra/**/*.tfstate
+infra/**/*.tfstate.*
+infra/**/*.tfvars
+!infra/**/*.tfvars.example
+infra/.image-tag
+# NOTE: infra/.terraform.lock.hcl is intentionally COMMITTED (pins provider versions
+# for reproducible builds across the team / CI) — do not ignore it.
+
+# Local env
+.env
+*.local

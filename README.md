@@ -143,11 +143,18 @@ Common knobs (full list in `src/pdf_anonymiser/config.py` / `infra/variables.tf`
 | Setting | Default | What |
 |---|---|---|
 | `gemini_location` | `europe-west4` | Vertex location (residency) |
-| `vision_model` / `planner_model` / `image_model` | `gemini-2.5-pro` / `gemini-2.5-flash` / `gemini-2.5-flash-image` (GA, EU) | the models — `make models` picks the newest GA set your project can call |
+| `vision_model` / `planner_model` / `image_model` | GA set (see note) | which Gemini models to use — `make models` picks the best your project/region can call |
 | `pii_use_dlp` | on | union Cloud DLP into the scan |
 | `pii_dlp_leak_check` | on | certified value-carryover leak check |
 | `pii_max_parallel` | 4 | pages anonymised concurrently |
 | `enable_iap` / `iap_members` | on / — | who can open the UI |
+
+> **Models** (all **GA**, no preview). The built-in default is an **EU-resident** set —
+> `gemini-2.5-pro` (vision/judge) · `gemini-2.5-flash` (planner) · `gemini-2.5-flash-image`
+> (image) in `europe-west4`. The **newest** models are **global-only**, so for top quality
+> (at the cost of EU residency) use `gemini-3.5-flash` for **vision + planner** and
+> `gemini-3-pro-image` for **image** with `gemini_location = "global"` — this is what the
+> bundled `dev.tfvars` ships. `make models` probes your project and writes the best set.
 
 ## Make targets
 

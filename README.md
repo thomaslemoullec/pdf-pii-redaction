@@ -6,9 +6,9 @@ like the printed name under a signature — it **regenerates** each page with ev
 swapped for a realistic *synthetic* one of the same type, format and place, so the document
 stays genuine-looking while carrying no real PII. **Cloud Storage only — no database.**
 
-<video src="docs/video_pdf.mp4" autoplay loop muted playsinline controls width="100%">
-  Your browser can't play the embedded demo — <a href="docs/video_pdf.mp4">watch it here ↗</a>.
-</video>
+![PDF Anonymiser — live demo (loops)](docs/demo.gif)
+
+<sub>The demo loops above · [watch the full-resolution video](docs/video_pdf.mp4)</sub>
 
 **How it works** — page by page:
 

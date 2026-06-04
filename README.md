@@ -15,6 +15,23 @@ Why regenerate instead of redact? Masking destroys layout and misses the easy-to
 values (salutations, headers, the printed name under a signature). Regeneration keeps the
 document genuine-looking while removing every real value.
 
+## Architecture
+
+<!-- Diagram: save it to docs/architecture.png, then uncomment the line below. -->
+<!-- ![Architecture](docs/architecture.png) -->
+
+Two runtime pieces over a **Cloud Storage-only** store (no database):
+
+- a **batch Cloud Run Job** that fans out across the source PDFs — each task takes a
+  round-robin shard of documents and processes them page by page, writing one immutable
+  JSON result + the synthetic PDF per document;
+- a **FastAPI + HTMX review UI** (Cloud Run service, behind **IAP**) that reads those
+  results live, drives the human validate/reject flow, and triggers relaunches.
+
+**Pub/Sub** carries `started`/`finished` job events; **Cloud Monitoring** turns the app's
+structured logs into a dashboard. See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for
+the GCS layout, the exactly-once completion latch, and the concurrency model.
+
 ---
 
 ## Quickstart (local, no cloud)
@@ -62,6 +79,11 @@ In the UI: **Launch** a job (source = one of those prefixes, output
 **Start review** — original vs synthetic side-by-side, the detected PII, the score, the
 verdict. **Validate** or **Reject**; validated docs move to `…/validated/`.
 
+Filter and sort the report by AI verdict, human validation, score or pages, and toggle the
+**live refresh** off while you read. A document that hit a transient error shows **error** —
+**relaunch** one (or all errored docs at once) from the report; it re-processes just those,
+shows them as *processing*, and updates the verdict live.
+
 ## Monitoring & notifications
 
 - **Dashboard.** Every deploy ships a Cloud Monitoring **Logs & Metrics dashboard**
@@ -81,8 +103,8 @@ verdict. **Validate** or **Reject**; validated docs move to `…/validated/`.
 1. **Plan** — a free-text description → a scoped PII-type list (Gemini **Flash**).
 2. **Scan** — each page is read by **Gemini vision ∪ Cloud DLP** (types + location, never
    values).
-3. **Synthesise** — **Nano Banana Pro** regenerates the page, PII → realistic fakes,
-   layout intact.
+3. **Synthesise** — the **Gemini image model** (Nano Banana / Nano Banana Pro) regenerates
+   the page, PII → realistic fakes, layout intact.
 4. **Check** — three independent signals: deterministic **metrics**, a **certified DLP
    value-carryover** check (no real value survived), and an **LLM-as-judge**. Any leak →
    retry with targeted feedback (bounded), else done.
@@ -98,23 +120,32 @@ deterministic so the leak gate stays auditable.
 ## Verdict & score
 
 ```
-score = removal_recall × fidelity        # did we remove all PII × did we leave the rest alone
+score = F1(removal_recall, fidelity) = 2·r·f / (r + f)   # harmonic mean: high only if BOTH are
 ```
+
+`removal_recall` = share of detected PII whose value no longer appears; `fidelity` = share of
+the *non*-PII text left untouched (fuzzy, so OCR noise doesn't count against it). The harmonic
+mean means a strong score on one axis can't paper over a weak one.
+
+The **AI verdict** reconciles three independent signals — deterministic value-match
+**metrics**, the **certified DLP** value-carryover check, and the **LLM judge**:
 
 | Verdict | Meaning |
 |---|---|
-| **pass** | nothing leaked and fidelity ≥ 0.9 |
-| **review** | no leak, but layout/fidelity slipped |
-| **fail** | a real value survived |
+| **pass** | every signal agrees — no real value survived, layout preserved (fidelity ≥ 0.9) |
+| **review** | nothing leaked, but a signal *doubts* it — fidelity dipped, or the judge isn't sure all PII was replaced / layout drifted |
+| **fail** | a real value survived (decided by the deterministic metric or DLP check, not the model) |
+| **error** | the page/document failed to process (e.g. a transient timeout) — relaunch it from the UI |
 
 A document's verdict is the worst of its pages. The launch **review policy** sends *all*
 docs to the queue, or only *flagged* ones (so large clean runs auto-approve).
 
 ## Data residency
 
-Page content (with real PII at scan/judge time) is sent to Gemini. The default is an **EU**
-Vertex location. The newest preview models are **global-only** — choosing them means
-content leaves the EU. `make models` shows both options; pick consciously.
+Page content (with real PII at scan/judge time) is sent to Gemini. The Terraform default is
+an **EU** Vertex location with GA models that have EU endpoints. Some of the **newest** GA
+models (e.g. the top-tier image model) are **global-only** — choosing them means content
+leaves the EU. `make models` shows what's available per region; pick consciously.
 
 ## Configuration
 
@@ -123,7 +154,7 @@ Common knobs (full list in `src/pdf_anonymiser/config.py` / `infra/variables.tf`
 | Setting | Default | What |
 |---|---|---|
 | `gemini_location` | `europe-west4` | Vertex location (residency) |
-| `vision_model` / `planner_model` / `image_model` | 3.x Pro / 3.5 Flash / Pro image | the models |
+| `vision_model` / `planner_model` / `image_model` | `gemini-2.5-pro` / `gemini-2.5-flash` / `gemini-2.5-flash-image` (GA, EU) | the models — `make models` picks the newest GA set your project can call |
 | `pii_use_dlp` | on | union Cloud DLP into the scan |
 | `pii_dlp_leak_check` | on | certified value-carryover leak check |
 | `pii_max_parallel` | 4 | pages anonymised concurrently |

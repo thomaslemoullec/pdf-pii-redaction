@@ -1,19 +1,28 @@
 # PDF Anonymiser
 
 Turn a folder of PDFs that contain personal data into a **PII-free** set you can share,
-with a **human in the loop**. For each page it detects the PII, **regenerates** the page
-with every real value swapped for a realistic *synthetic* one (same type, same format,
-same place), checks nothing leaked, and routes documents to a review queue. **Cloud
-Storage only — no database.**
+with a **human in the loop**. Instead of masking — which wrecks the layout and misses values
+like the printed name under a signature — it **regenerates** each page with every real value
+swapped for a realistic *synthetic* one of the same type, format and place, so the document
+stays genuine-looking while carrying no real PII. **Cloud Storage only — no database.**
 
-```
- configure → plan PII scope → for each page: scan → synthesise → check → (retry) → human review
-                                             Gemini + DLP   Nano Banana   metrics·DLP·LLM   validated/ + unvalidated/
-```
+**How it works** — page by page:
 
-Why regenerate instead of redact? Masking destroys layout and misses the easy-to-miss
-values (salutations, headers, the printed name under a signature). Regeneration keeps the
-document genuine-looking while removing every real value.
+1. **Plan** — a free-text description → a scoped PII-type list (Gemini **Flash**).
+2. **Scan** — read by **Gemini vision ∪ Cloud DLP** — PII *types + location*, never values.
+3. **Synthesise** — the **Gemini image model** (Nano Banana) regenerates the page: real
+   values → realistic fakes, layout intact.
+4. **Check** — three independent signals: deterministic **metrics**, a **certified DLP
+   value-carryover** check, and an **LLM-as-judge**. A leak triggers an **automatic retry
+   with targeted feedback** (bounded); otherwise the page is done.
+5. **Review** — worst-scoring first, a human **validates** or **rejects**.
+
+Steps 3–4 run as a small **redaction agent** that calls each signal — and the retry/stop
+decision — as an explicit, swappable tool; the decision tool is deterministic, so the leak
+gate stays auditable.
+
+→ Pipeline detail: **[docs/PIPELINE.md](docs/PIPELINE.md)** · design (GCS-only store,
+exactly-once latch, concurrency): **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ## Architecture
 
@@ -97,25 +106,6 @@ shows them as *processing*, and updates the verdict live.
   dashboard's log-based metrics — no metrics API calls.
 
 ---
-
-## How it works (in brief)
-
-1. **Plan** — a free-text description → a scoped PII-type list (Gemini **Flash**).
-2. **Scan** — each page is read by **Gemini vision ∪ Cloud DLP** (types + location, never
-   values).
-3. **Synthesise** — the **Gemini image model** (Nano Banana / Nano Banana Pro) regenerates
-   the page, PII → realistic fakes, layout intact.
-4. **Check** — three independent signals: deterministic **metrics**, a **certified DLP
-   value-carryover** check (no real value survived), and an **LLM-as-judge**. Any leak →
-   retry with targeted feedback (bounded), else done.
-5. **Review** — worst-scoring first; a human validates or rejects.
-
-Steps 3–4 are a small **redaction agent** (`redaction_agent.py`) that calls each signal —
-and the retry/stop decision — as an explicit, swappable tool; the decision tool is
-deterministic so the leak gate stays auditable.
-
-→ Full walkthrough with the "why" behind each step: **[docs/PIPELINE.md](docs/PIPELINE.md)**.
-→ Design (GCS-only store, exactly-once latch, concurrency): **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ## Verdict & score
 

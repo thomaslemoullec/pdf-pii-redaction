@@ -26,8 +26,7 @@ exactly-once latch, concurrency): **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ## Architecture
 
-<!-- Diagram: save it to docs/architecture.png, then uncomment the line below. -->
-<!-- ![Architecture](docs/architecture.png) -->
+![PDF Anonymiser — architecture & flow diagram](docs/architecture.jpeg)
 
 Two runtime pieces over a **Cloud Storage-only** store (no database):
 

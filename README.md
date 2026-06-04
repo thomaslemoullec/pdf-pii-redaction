@@ -40,6 +40,30 @@ Two runtime pieces over a **Cloud Storage-only** store (no database):
 structured logs into a dashboard. See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for
 the GCS layout, the exactly-once completion latch, and the concurrency model.
 
+## Ratings & review
+
+Each page is rated by three independent signals; a document takes the **worst** of its pages.
+
+| Signal | What it measures |
+|---|---|
+| **removal recall** | share of the source's detected PII whose exact value no longer appears in the output |
+| **fidelity** | share of the *non-PII* text left unchanged (fuzzy — tolerant of OCR noise) |
+| **score** | overall quality = **F1** of recall and fidelity = `2·r·f / (r+f)` — high only if *both* are |
+| **DLP carryover** | Cloud DLP re-scans the output for surviving real values — *certified* types (IBAN…) vs *soft* (`name`/`other`) |
+| **AI judge** | a vision check: all PII replaced? layout preserved? any value leaked? |
+
+| Tag | When |
+|---|---|
+| 🟢 **pass** | nothing leaked, fidelity ≥ threshold, judge satisfied — every signal agrees |
+| 🟡 **review** | nothing *certainly* leaked, but a doubt: fidelity below threshold, a soft DLP `name`/`other` hit, or the judge flags incomplete replacement / layout drift |
+| 🔴 **fail** | a real value survived — the exact value-match, a *certified* DLP type, or the judge says leaked |
+| ⚫ **error** | the page/document failed to process (e.g. a timeout) — relaunch it from the UI |
+
+**Human review** is triggered when a document's tag isn't `pass`, **or** its score is below the
+**score threshold**. The **fidelity** and **score** thresholds are sliders at launch (default
+`0.85`) — either one below its bar sends the document to a reviewer; clean, high-scoring
+documents auto-approve.
+
 ---
 
 ## Quickstart (local, no cloud)
@@ -105,29 +129,6 @@ shows them as *processing*, and updates the verdict live.
   dashboard's log-based metrics — no metrics API calls.
 
 ---
-
-## Verdict & score
-
-```
-score = F1(removal_recall, fidelity) = 2·r·f / (r + f)   # harmonic mean: high only if BOTH are
-```
-
-`removal_recall` = share of detected PII whose value no longer appears; `fidelity` = share of
-the *non*-PII text left untouched (fuzzy, so OCR noise doesn't count against it). The harmonic
-mean means a strong score on one axis can't paper over a weak one.
-
-The **AI verdict** reconciles three independent signals — deterministic value-match
-**metrics**, the **certified DLP** value-carryover check, and the **LLM judge**:
-
-| Verdict | Meaning |
-|---|---|
-| **pass** | every signal agrees — no real value survived, layout preserved (fidelity ≥ 0.9) |
-| **review** | nothing leaked, but a signal *doubts* it — fidelity dipped, or the judge isn't sure all PII was replaced / layout drifted |
-| **fail** | a real value survived (decided by the deterministic metric or DLP check, not the model) |
-| **error** | the page/document failed to process (e.g. a transient timeout) — relaunch it from the UI |
-
-A document's verdict is the worst of its pages. The launch **review policy** sends *all*
-docs to the queue, or only *flagged* ones (so large clean runs auto-approve).
 
 ## Data residency
 

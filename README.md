@@ -6,6 +6,10 @@ like the printed name under a signature — it **regenerates** each page with ev
 swapped for a realistic *synthetic* one of the same type, format and place, so the document
 stays genuine-looking while carrying no real PII. **Cloud Storage only — no database.**
 
+<video src="docs/video_pdf.mp4" autoplay loop muted playsinline controls width="100%">
+  Your browser can't play the embedded demo — <a href="docs/video_pdf.mp4">watch it here ↗</a>.
+</video>
+
 **How it works** — page by page:
 
 1. **Plan** — a free-text description → a scoped PII-type list (Gemini **Flash**).
@@ -161,3 +165,11 @@ Common knobs (full list in `src/pdf_anonymiser/config.py` / `infra/variables.tf`
 
 `make help` lists all. Most-used: `install` · `test` · `serve` · `setup` · `models` ·
 `models-write` · `seed` · `deploy` · `destroy`.
+
+## Roadmap
+
+Near-term improvements to push the leak rate down further and sharpen review:
+
+1. **Bounding-box overlay** — draw the detected PII boxes on the page in the review UI, so a human sees exactly what was found (and where) at a glance.
+2. **Location-aware retries** — feed the PII *locations* (boxes), not just the types, into the retry hint/feedback so the image model re-targets the exact spots it missed.
+3. **Optional value injection** — a toggle to insert the actual scanned PII *values* into the redaction instruction (today only types are passed, to stay PII-minimal) — for hard cases, at an explicit data-exposure trade-off.

@@ -13,8 +13,6 @@ stays genuine-looking while carrying no real PII. **Cloud Storage only — no da
   <img src="docs/demo.gif" alt="PDF Anonymiser — live demo (loops)" width="100%">
 </video>
 
-<sub>HD video above · [download the full-resolution MP4](docs/video_pdf.mp4)</sub>
-
 **How it works** — page by page:
 
 1. **Plan** — a free-text description → a scoped PII-type list (Gemini **Flash**).

@@ -11,6 +11,7 @@ from PIL import Image
 from pdf_anonymiser.pii_batch import InMemoryObjectStore
 from pdf_anonymiser.pii_result_store import InMemoryPiiResultStore, PiiDoc
 from pdf_anonymiser.webapp import create_app
+from pdf_anonymiser.webapp.app import validate_job_uris
 
 
 def _png() -> bytes:
@@ -336,3 +337,67 @@ def test_rerun_relaunches_a_single_document(tmp_path) -> None:  # type: ignore[n
     assert launches[-1]["total"] == 1  # single-doc rerun
     # the job's total is untouched (rerun doesn't reset it)
     assert rs.get_job(job_id).total == 2
+
+
+# --- bucket/prefix layout enforcement (mirrors the IAM write condition) ---------
+
+
+def test_validate_job_uris_accepts_in_bucket_output_under_root() -> None:
+    # default root "output"; source can be any in-bucket folder (reads are bucket-wide)
+    assert validate_job_uris("gs://b/incoming/", "gs://b/output/kyc", data_bucket="b") is None
+    assert validate_job_uris("gs://b/source", "gs://b/output", data_bucket="b") is None
+    # configurable root — matches the live "anonymised" convention
+    assert validate_job_uris(
+        "gs://b/incoming-multi/", "gs://b/anonymised", data_bucket="b", output_prefix="anonymised"
+    ) is None
+
+
+def test_validate_job_uris_rejects_wrong_bucket_or_output_root() -> None:
+    # output in a different bucket than the SA is granted on
+    assert validate_job_uris("gs://b/incoming/", "gs://other/output/", data_bucket="b")
+    # output not under the configured root (would be denied by the IAM write condition)
+    err = validate_job_uris("gs://b/incoming/", "gs://b/anon/", data_bucket="b", output_prefix="anonymised")
+    assert err and "output must be under gs://b/anonymised/" in err
+    # source outside the data bucket is flagged
+    assert "source must be in the data bucket" in (
+        validate_job_uris("gs://other/in/", "gs://b/output/", data_bucket="b") or ""
+    )
+
+
+def test_launch_rejects_output_outside_write_root(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("PII_CONTROL_URI", "gs://databkt/_pii_runs")
+    obj = InMemoryObjectStore({"gs://databkt/incoming/a.pdf": b"%PDF"})
+    launches: list = []  # type: ignore[type-arg]
+    client, rs = _client(tmp_path, obj, launches)
+    r = client.post("/jobs", data={
+        "source": "gs://databkt/incoming/", "output": "gs://databkt/somewhere-else",
+        "label": "k", "types": ["name"],
+    })
+    assert r.status_code == 400
+    assert "output must be under gs://databkt/output/" in r.text
+    assert launches == [] and rs.list_jobs() == []  # nothing created or launched
+
+
+def test_launch_accepts_configured_output_root(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    # PII_OUTPUT_PREFIX drives validation — here the live "anonymised" convention, with the
+    # real incoming-*/ → anonymised flow.
+    monkeypatch.setenv("PII_CONTROL_URI", "gs://databkt/_pii_runs")
+    monkeypatch.setenv("PII_OUTPUT_PREFIX", "anonymised")
+    obj = InMemoryObjectStore({
+        "gs://databkt/incoming-single-page/a.pdf": b"%PDF",
+        "gs://databkt/incoming-single-page/b.pdf": b"%PDF",
+    })
+    launches: list = []  # type: ignore[type-arg]
+    client, rs = _client(tmp_path, obj, launches)
+    r = client.post("/jobs", data={
+        "source": "gs://databkt/incoming-single-page/", "output": "gs://databkt/anonymised",
+        "label": "k", "types": ["name"],
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    assert len(launches) == 1 and rs.list_jobs()[0].total == 2
+    # a job pointing outside the configured root is rejected even though it's in-bucket
+    bad = client.post("/jobs", data={
+        "source": "gs://databkt/incoming-single-page/", "output": "gs://databkt/output/x",
+        "label": "k", "types": ["name"],
+    })
+    assert bad.status_code == 400 and "output must be under gs://databkt/anonymised/" in bad.text

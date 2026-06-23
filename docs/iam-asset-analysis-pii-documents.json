@@ -1,0 +1,184 @@
+Your analysis request is fully explored. The ACLs matching your requests are listed per IAM policy binding, so there could be duplications.
+[
+  {
+    "ACLs": [
+      {
+        "accesses": [
+          {
+            "role": "roles/run.developer"
+          }
+        ],
+        "identities": [
+          {
+            "name": "serviceAccount:pdf-anonymiser-dev@pii-documents.iam.gserviceaccount.com"
+          }
+        ],
+        "resources": [
+          {
+            "fullResourceName": "//run.googleapis.com/projects/pii-documents/locations/europe-west3/jobs/pdf-anonymiser-batch-dev"
+          }
+        ]
+      }
+    ],
+    "policy": {
+      "attachedResource": "//run.googleapis.com/projects/pii-documents/locations/europe-west3/jobs/pdf-anonymiser-batch-dev",
+      "binding": {
+        "members": [
+          "serviceAccount:pdf-anonymiser-dev@pii-documents.iam.gserviceaccount.com"
+        ],
+        "role": "roles/run.developer"
+      }
+    }
+  },
+  {
+    "ACLs": [
+      {
+        "accesses": [
+          {
+            "role": "roles/pubsub.publisher"
+          }
+        ],
+        "identities": [
+          {
+            "name": "serviceAccount:pdf-anonymiser-dev@pii-documents.iam.gserviceaccount.com"
+          }
+        ],
+        "resources": [
+          {
+            "fullResourceName": "//pubsub.googleapis.com/projects/pii-documents/topics/pdf-anonymiser-events-dev"
+          }
+        ]
+      }
+    ],
+    "policy": {
+      "attachedResource": "//pubsub.googleapis.com/projects/pii-documents/topics/pdf-anonymiser-events-dev",
+      "binding": {
+        "members": [
+          "serviceAccount:pdf-anonymiser-dev@pii-documents.iam.gserviceaccount.com",
+          "serviceAccount:service-332106233455@gs-project-accounts.iam.gserviceaccount.com"
+        ],
+        "role": "roles/pubsub.publisher"
+      }
+    }
+  },
+  {
+    "ACLs": [
+      {
+        "accesses": [
+          {
+            "role": "roles/storage.objectAdmin"
+          }
+        ],
+        "identities": [
+          {
+            "name": "serviceAccount:pdf-anonymiser-dev@pii-documents.iam.gserviceaccount.com"
+          }
+        ],
+        "resources": [
+          {
+            "fullResourceName": "//storage.googleapis.com/pii-documents-pdf-anonymiser-dev"
+          }
+        ]
+      }
+    ],
+    "policy": {
+      "attachedResource": "//storage.googleapis.com/pii-documents-pdf-anonymiser-dev",
+      "binding": {
+        "members": [
+          "serviceAccount:pdf-anonymiser-dev@pii-documents.iam.gserviceaccount.com"
+        ],
+        "role": "roles/storage.objectAdmin"
+      }
+    }
+  },
+  {
+    "ACLs": [
+      {
+        "accesses": [
+          {
+            "role": "roles/iam.serviceAccountUser"
+          }
+        ],
+        "identities": [
+          {
+            "name": "serviceAccount:pdf-anonymiser-dev@pii-documents.iam.gserviceaccount.com"
+          }
+        ],
+        "resources": [
+          {
+            "fullResourceName": "//iam.googleapis.com/projects/pii-documents/serviceAccounts/pdf-anonymiser-dev@pii-documents.iam.gserviceaccount.com"
+          }
+        ]
+      }
+    ],
+    "policy": {
+      "attachedResource": "//iam.googleapis.com/projects/pii-documents/serviceAccounts/pdf-anonymiser-dev@pii-documents.iam.gserviceaccount.com",
+      "binding": {
+        "members": [
+          "serviceAccount:pdf-anonymiser-dev@pii-documents.iam.gserviceaccount.com"
+        ],
+        "role": "roles/iam.serviceAccountUser"
+      }
+    }
+  },
+  {
+    "ACLs": [
+      {
+        "accesses": [
+          {
+            "role": "roles/aiplatform.user"
+          }
+        ],
+        "identities": [
+          {
+            "name": "serviceAccount:pdf-anonymiser-dev@pii-documents.iam.gserviceaccount.com"
+          }
+        ],
+        "resources": [
+          {
+            "fullResourceName": "//cloudresourcemanager.googleapis.com/projects/pii-documents"
+          }
+        ]
+      }
+    ],
+    "policy": {
+      "attachedResource": "//cloudresourcemanager.googleapis.com/projects/pii-documents",
+      "binding": {
+        "members": [
+          "serviceAccount:pdf-anonymiser-dev@pii-documents.iam.gserviceaccount.com"
+        ],
+        "role": "roles/aiplatform.user"
+      }
+    }
+  },
+  {
+    "ACLs": [
+      {
+        "accesses": [
+          {
+            "role": "roles/dlp.user"
+          }
+        ],
+        "identities": [
+          {
+            "name": "serviceAccount:pdf-anonymiser-dev@pii-documents.iam.gserviceaccount.com"
+          }
+        ],
+        "resources": [
+          {
+            "fullResourceName": "//cloudresourcemanager.googleapis.com/projects/pii-documents"
+          }
+        ]
+      }
+    ],
+    "policy": {
+      "attachedResource": "//cloudresourcemanager.googleapis.com/projects/pii-documents",
+      "binding": {
+        "members": [
+          "serviceAccount:pdf-anonymiser-dev@pii-documents.iam.gserviceaccount.com"
+        ],
+        "role": "roles/dlp.user"
+      }
+    }
+  }
+]

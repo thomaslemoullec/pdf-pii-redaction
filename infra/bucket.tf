@@ -3,8 +3,10 @@
 #   _pii_runs/<job>/...          the GCS-only control plane (job.json, results, index)
 #   <output>/{unvalidated,validated}/<doc>/...   the PII-free output
 #
-# Locked down for documents that contain real PII: uniform IAM, public access
-# prevention enforced, optional CMEK + retention.
+# Locked down for documents that contain real PII: uniform IAM, public access prevention
+# enforced, optional CMEK. Data durability is versioning + soft delete (deleted/overwritten
+# objects stay recoverable) — deliberately NOT a bucket-wide retention policy, which would
+# block the pipeline's normal overwrites/deletes (see var.bucket_retention_days).
 resource "google_storage_bucket" "data" {
   name                        = "${var.project_id}-pdf-anonymiser-${var.environment}"
   location                    = var.region
@@ -14,6 +16,12 @@ resource "google_storage_bucket" "data" {
 
   versioning {
     enabled = true
+  }
+
+  # Soft delete: a recovery window for deleted/overwritten objects that does NOT block the
+  # pipeline's overwrites (job.json) or deletes (promote unvalidated->validated). 0 disables.
+  soft_delete_policy {
+    retention_duration_seconds = var.bucket_soft_delete_days * 24 * 3600
   }
 
   # Tidy up stale noncurrent versions so the bucket doesn't grow unbounded.
@@ -33,6 +41,10 @@ resource "google_storage_bucket" "data" {
     }
   }
 
+  # WORM retention — OFF by default and should stay off for THIS bucket: a retention policy
+  # blocks overwrites/deletes and breaks the pipeline (job.json overwrites, promote deletes,
+  # version cleanup). Kept only for a future dedicated deliverables bucket. Use
+  # var.bucket_soft_delete_days for recoverability instead.
   dynamic "retention_policy" {
     for_each = var.bucket_retention_days == 0 ? [] : [var.bucket_retention_days]
     content {

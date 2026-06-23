@@ -30,7 +30,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from ..pii import PiiType
-from ..pii_batch import ObjectStore
+from ..pii_batch import ObjectStore, parse_gs_uri
 
 _HERE = Path(__file__).resolve().parent
 
@@ -46,6 +46,29 @@ _ROUTING_LABELS = {
 
 def _routing_label(routing: str) -> str:
     return _ROUTING_LABELS.get(routing, (routing or "").replace("_", " ").capitalize())
+
+
+def validate_job_uris(
+    source: str, output: str, *, data_bucket: str, output_prefix: str = "output"
+) -> str | None:
+    """Reject job source/output URIs that fall outside the IAM-enforced bucket layout.
+
+    The service account's writes are IAM-conditioned to the data bucket's ``output_prefix``
+    and ``_pii_runs/`` prefixes (see infra/iam.tf), so a job whose output points elsewhere is
+    denied at write time. We mirror that here to fail fast with a clear message instead of a
+    late 403. ``output_prefix`` comes from PII_OUTPUT_PREFIX, the same value that drives the
+    IAM condition, so app and policy never drift. Source only has to live in the data bucket
+    (reads are bucket-wide), so the input layout (e.g. incoming-*/) is unconstrained.
+    Returns an error string, or ``None`` if both URIs are valid.
+    """
+    src = source.rstrip("/") + "/"
+    out = output.rstrip("/") + "/"
+    errs = []
+    if not src.startswith(f"gs://{data_bucket}/"):
+        errs.append(f"source must be in the data bucket gs://{data_bucket}/")
+    if not out.startswith(f"gs://{data_bucket}/{output_prefix}/"):
+        errs.append(f"output must be under gs://{data_bucket}/{output_prefix}/")
+    return " and ".join(errs) if errs else None
 
 
 # --- pure view helpers (no I/O) ---------------------------------------------
@@ -355,8 +378,16 @@ def create_app(
 
     # --- routes -------------------------------------------------------------
 
-    @app.get("/", response_class=HTMLResponse)
-    def home(request: Request) -> Response:
+    def _data_bucket() -> str:
+        """The data bucket the SA is granted on, derived from the control-plane URI."""
+        control = os.environ.get("PII_CONTROL_URI", "")
+        return parse_gs_uri(control)[0] if control else ""
+
+    def _output_prefix() -> str:
+        """The write root jobs must output under — same value that drives the IAM condition."""
+        return os.environ.get("PII_OUTPUT_PREFIX", "output")
+
+    def _launcher_ctx(extra: dict[str, Any] | None = None) -> dict[str, Any]:
         rs = _result_store()
         jobs = rs.list_jobs()
         statuses: dict[str, tuple[str, str]] = {}
@@ -366,10 +397,17 @@ def create_app(
                 docs, _ = rs.list_documents(j.job_id, only_review=True, size=10_000_000)
                 pending = sum(1 for d in docs if d.validation_status == "pending")
             statuses[j.job_id] = _derive_status(j.status, pending)
-        return templates.TemplateResponse(
-            request, "launch.html",
-            {"jobs": jobs, "statuses": statuses, "pii_types": [t.value for t in PiiType]},
-        )
+        ctx: dict[str, Any] = {
+            "jobs": jobs, "statuses": statuses, "pii_types": [t.value for t in PiiType],
+            "data_bucket": _data_bucket(), "output_prefix": _output_prefix(), "error": None,
+        }
+        if extra:
+            ctx.update(extra)
+        return ctx
+
+    @app.get("/", response_class=HTMLResponse)
+    def home(request: Request) -> Response:
+        return templates.TemplateResponse(request, "launch.html", _launcher_ctx())
 
     @app.post("/jobs/suggest", response_class=HTMLResponse)
     def suggest(request: Request, description: str = Form("")) -> Response:
@@ -388,11 +426,26 @@ def create_app(
 
     @app.post("/jobs")
     def launch_job(
+        request: Request,
         source: str = Form(...), output: str = Form(...), label: str = Form("documents"),
         types: list[str] = Form(default=[]), limit: int = Form(0),
         fidelity_threshold: float = Form(0.85), score_threshold: float = Form(0.85),
     ) -> Response:
         from ..pii_batch import list_source_pdfs
+
+        # Reject locations the SA can't write to (IAM denies them anyway) — fail fast with a
+        # clear message rather than a 403 mid-run. Only enforced when the data bucket is known.
+        bucket = _data_bucket()
+        if bucket and (
+            err := validate_job_uris(
+                source, output, data_bucket=bucket, output_prefix=_output_prefix()
+            )
+        ):
+            return templates.TemplateResponse(
+                request, "launch.html",
+                _launcher_ctx({"error": f"Invalid job location: {err}."}),
+                status_code=400,
+            )
 
         capped = limit if limit > 0 else None  # ≤0 means "process the whole folder"
         try:

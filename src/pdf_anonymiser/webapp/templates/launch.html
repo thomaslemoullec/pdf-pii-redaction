@@ -9,12 +9,15 @@
 
 <section class="panel">
   <h3>New job</h3>
+  {% if error is defined and error %}<p class="banner bad small">{{ error }}</p>{% endif %}
+  {% set bkt = data_bucket if data_bucket is defined and data_bucket else 'my-bucket' %}
+  {% set outp = output_prefix if output_prefix is defined and output_prefix else 'output' %}
   <form method="post" action="/jobs" class="stack">
-    <label>Source folder <span class="muted small">(gs:// prefix of the PDFs to anonymise)</span>
-      <input class="input" name="source" placeholder="gs://my-bucket/incoming/" required>
+    <label>Source folder <span class="muted small">(gs:// prefix of the PDFs, anywhere in the data bucket)</span>
+      <input class="input" name="source" placeholder="gs://{{ bkt }}/incoming/" required>
     </label>
-    <label>Output location <span class="muted small">(PII-free pages are written under here)</span>
-      <input class="input" name="output" placeholder="gs://my-bucket/anonymised" required>
+    <label>Output location <span class="muted small">(PII-free pages are written under <span class="mono">{{ outp }}/</span>)</span>
+      <input class="input" name="output" placeholder="gs://{{ bkt }}/{{ outp }}/" required>
     </label>
     <label>Job label <span class="muted small">(a name for this run)</span>
       <input class="input" name="label" value="documents">

@@ -13,6 +13,9 @@ locals {
     PII_DLP_LEAK_CHECK = var.pii_dlp_leak_check ? "1" : "0"
     PII_MAX_PARALLEL   = tostring(var.pii_max_parallel)
     PII_CONTROL_URI    = "gs://${google_storage_bucket.data.name}/_pii_runs"
+    # The write root the UI validates job output against — kept in lockstep with the IAM
+    # write condition (infra/iam.tf) so the app rejects exactly what IAM would deny.
+    PII_OUTPUT_PREFIX  = var.data_output_prefix
     PII_EVENTS_TOPIC   = google_pubsub_topic.events.name
     PII_BATCH_JOB_NAME = local.job_name
     # Deep link to the Logs & Metrics dashboard — surfaced in the UI and in the

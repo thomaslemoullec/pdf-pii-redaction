@@ -24,7 +24,12 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
 from .obs import EVENT_DOCUMENT, log_event
-from .pii_result_store import PiiDoc, PiiResultStore, ReviewPolicy
+from .pii_result_store import (
+    PiiDoc,
+    PiiResultStore,
+    ReviewPolicy,
+    classification_metadata,
+)
 
 if TYPE_CHECKING:
     from PIL.Image import Image
@@ -57,8 +62,11 @@ class ObjectStore(Protocol):
         ...
     def read(self, uri: str) -> bytes: ...
     def write(
-        self, uri: str, data: bytes, *, content_type: str = "application/octet-stream"
-    ) -> None: ...
+        self, uri: str, data: bytes, *, content_type: str = "application/octet-stream",
+        metadata: dict[str, str] | None = None,
+    ) -> None:
+        """Write an object; ``metadata`` becomes its custom (user) metadata, if any."""
+        ...
     def copy(self, src_uri: str, dst_uri: str) -> None: ...
     def delete(self, uri: str) -> None: ...
     def create_if_absent(self, uri: str, data: bytes) -> bool: ...
@@ -70,6 +78,7 @@ class InMemoryObjectStore:
     def __init__(self, blobs: dict[str, bytes] | None = None) -> None:
         self._blobs: dict[str, bytes] = dict(blobs or {})
         self._gen: dict[str, int] = dict.fromkeys(self._blobs, 1)  # bump on each write
+        self._meta: dict[str, dict[str, str]] = {}  # per-object custom metadata
 
     def list(self, prefix_uri: str) -> list[str]:
         return sorted(uri for uri in self._blobs if uri.startswith(prefix_uri))
@@ -81,18 +90,24 @@ class InMemoryObjectStore:
         return self._blobs[uri]
 
     def write(
-        self, uri: str, data: bytes, *, content_type: str = "application/octet-stream"
+        self, uri: str, data: bytes, *, content_type: str = "application/octet-stream",
+        metadata: dict[str, str] | None = None,
     ) -> None:
         self._blobs[uri] = data
         self._gen[uri] = self._gen.get(uri, 0) + 1
+        if metadata is not None:
+            self._meta[uri] = dict(metadata)
 
     def copy(self, src_uri: str, dst_uri: str) -> None:
         self._blobs[dst_uri] = self._blobs[src_uri]
         self._gen[dst_uri] = self._gen.get(dst_uri, 0) + 1
+        if src_uri in self._meta:  # custom metadata travels with the object on copy (as GCS does)
+            self._meta[dst_uri] = dict(self._meta[src_uri])
 
     def delete(self, uri: str) -> None:
         self._blobs.pop(uri, None)
         self._gen.pop(uri, None)
+        self._meta.pop(uri, None)
 
     def create_if_absent(self, uri: str, data: bytes) -> bool:
         if uri in self._blobs:
@@ -104,6 +119,11 @@ class InMemoryObjectStore:
     @property
     def blobs(self) -> dict[str, bytes]:
         return self._blobs
+
+    @property
+    def meta(self) -> dict[str, dict[str, str]]:
+        """Per-object custom metadata recorded by :meth:`write` (for assertions)."""
+        return self._meta
 
 
 class GcsObjectStore:
@@ -138,10 +158,14 @@ class GcsObjectStore:
         return data
 
     def write(
-        self, uri: str, data: bytes, *, content_type: str = "application/octet-stream"
+        self, uri: str, data: bytes, *, content_type: str = "application/octet-stream",
+        metadata: dict[str, str] | None = None,
     ) -> None:
         bucket, key = parse_gs_uri(uri)
-        self._gcs().bucket(bucket).blob(key).upload_from_string(data, content_type=content_type)
+        blob = self._gcs().bucket(bucket).blob(key)
+        if metadata:  # custom (user) metadata — set on the blob before upload
+            blob.metadata = metadata
+        blob.upload_from_string(data, content_type=content_type)
 
     def copy(self, src_uri: str, dst_uri: str) -> None:
         sb, sk = parse_gs_uri(src_uri)
@@ -276,11 +300,18 @@ class PiiBatchProcessor:
         out_prefix = f"{dataset_base_uri.rstrip('/')}/unvalidated/{doc_id}"
 
         label = None
+        # Custom object metadata recording the computed sensitivity tier — attached to
+        # every output write so the classification travels with the object (informative
+        # only; see docs/DATA_CLASSIFICATION.md). Resolved once the scan yields a label.
+        class_meta = classification_metadata(routing="", max_sensitivity="")
         anon: list[Image | None] = [None] * len(pages)
         page_results: list[PageResult] = []
         for ev in self._review.review_events(doc_id, pages):
             if ev.kind == "scan_done":
                 label = ev.payload["label"]
+                class_meta = classification_metadata(
+                    routing=label.routing.value, max_sensitivity=label.max_sensitivity.name
+                )
             elif ev.kind == "page_done" and ev.payload.get("report") is None:
                 # A page that failed to process (e.g. a persistent 504) — recorded as an
                 # error page so the rest of the document still completes (no synthetic
@@ -305,7 +336,9 @@ class PiiBatchProcessor:
                 anon[i] = out_img
                 report = ev.payload["report"]
                 anon_uri = f"{out_prefix}/page-{i + 1}.png"
-                self._store.write(anon_uri, _png(out_img), content_type="image/png")
+                self._store.write(
+                    anon_uri, _png(out_img), content_type="image/png", metadata=class_meta
+                )
                 m = report.metrics
                 page_results.append(
                     PageResult(
@@ -334,7 +367,8 @@ class PiiBatchProcessor:
         ordered = [a for a in anon if a is not None]
         if ordered:
             self._store.write(
-                f"{out_prefix}/{doc_id}.pdf", _pages_to_pdf(ordered), content_type="application/pdf"
+                f"{out_prefix}/{doc_id}.pdf", _pages_to_pdf(ordered),
+                content_type="application/pdf", metadata=class_meta,
             )
         order = {"error": 3, "fail": 2, "review": 1, "pass": 0}
         if not page_results:

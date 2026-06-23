@@ -141,6 +141,44 @@ def test_gcs_store_uses_marker_object_for_completion() -> None:
     assert f"gs://b/_pii_runs/{job_id}/results/a.json" in obj.blobs
 
 
+def test_gcs_store_tags_result_with_classification_metadata() -> None:
+    # The result object carries the sensitivity tier + routing as custom object
+    # metadata (queryable without parsing the JSON body). Re-attached on rewrites
+    # (validation / rerun) so it survives, and the per-doc JSON still holds the values.
+    obj = InMemoryObjectStore()
+    store = GcsPiiResultStore(obj, "gs://b/_pii_runs", cache_ttl=0.0)
+    job_id = store.create_job(
+        dataset="k", source_uri="s", output_uri="o", pii_types=[], total=1,
+    )
+    doc = _doc(job_id, "a")
+    doc.routing, doc.max_sensitivity = "in_perimeter_only", "HIGH"
+    store.save_document(doc)
+
+    uri = f"gs://b/_pii_runs/{job_id}/results/a.json"
+    expected = {
+        "sensitivity": "HIGH",
+        "routing": "in_perimeter_only",
+        "classified_by": "sensitivity_policy",
+    }
+    assert obj.meta[uri] == expected
+    # a validation rewrite preserves the classification metadata
+    store.set_validation(job_id, "a", status="validated", note="ok")
+    assert obj.meta[uri] == expected
+    # and the values remain queryable from the record itself
+    assert store.get_document(job_id, "a").max_sensitivity == "HIGH"
+
+
+def test_classification_metadata_falls_back_for_unclassified() -> None:
+    from pdf_anonymiser.pii_result_store import classification_metadata
+
+    # an error document never got classified (empty routing/sensitivity) → lowest tier
+    assert classification_metadata(routing="", max_sensitivity="") == {
+        "sensitivity": "NONE",
+        "routing": "ok_for_global",
+        "classified_by": "sensitivity_policy",
+    }
+
+
 def test_result_store_from_env_defaults_to_memory(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.delenv("PII_CONTROL_URI", raising=False)
     assert isinstance(result_store_from_env(), InMemoryPiiResultStore)

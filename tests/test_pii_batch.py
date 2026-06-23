@@ -180,6 +180,26 @@ def test_process_document_writes_pii_free_output_and_records_pages() -> None:
     assert store.blobs[result.pdf_uri].startswith(b"%PDF")
 
 
+def test_process_document_tags_output_with_classification_metadata() -> None:
+    # The computed sensitivity tier is persisted as custom object metadata on every
+    # output write (pages + PDF), so the classification travels with the object.
+    # _FakeReview reports a NAME finding (MEDIUM, unlocalised) → IN_PERIMETER_ONLY.
+    store = InMemoryObjectStore({"gs://src/in/acct-0001.pdf": _pdf_bytes(2)})
+    proc = PiiBatchProcessor(review_service=_FakeReview(), renderer=_renderer, store=store)
+
+    result = proc.process_document(
+        "gs://src/in/acct-0001.pdf", dataset_base_uri="gs://out/kyc/pii_free"
+    )
+
+    expected = {
+        "sensitivity": "MEDIUM",
+        "routing": "in_perimeter_only",
+        "classified_by": "sensitivity_policy",
+    }
+    assert store.meta["gs://out/kyc/pii_free/unvalidated/acct-0001/page-1.png"] == expected
+    assert store.meta[result.pdf_uri] == expected
+
+
 def test_process_document_isolates_a_failed_page() -> None:
     # One page failing (e.g. a persistent 504) must NOT sink the whole multi-page doc:
     # the good pages are still written, the failed page is recorded as an error page,
@@ -382,8 +402,8 @@ class _ReadFailsStore:
             raise OSError("read failed")
         return self._inner.read(uri)
 
-    def write(self, uri, data, *, content_type="application/octet-stream"):  # type: ignore[no-untyped-def]
-        self._inner.write(uri, data, content_type=content_type)
+    def write(self, uri, data, *, content_type="application/octet-stream", metadata=None):  # type: ignore[no-untyped-def]
+        self._inner.write(uri, data, content_type=content_type, metadata=metadata)
 
     def copy(self, s, d):  # type: ignore[no-untyped-def]
         self._inner.copy(s, d)

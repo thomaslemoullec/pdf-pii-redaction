@@ -30,6 +30,36 @@ if TYPE_CHECKING:
     from .pii_batch import ObjectStore
 
 
+# --- Data classification metadata -------------------------------------------
+
+
+def classification_metadata(*, routing: str, max_sensitivity: str) -> dict[str, str]:
+    """Custom GCS object metadata recording the computed sensitivity classification.
+
+    Tags an object with the sensitivity tier + advisory routing label that
+    :class:`~.pii.SensitivityPolicy` already computed, so the classification travels
+    with the object and is queryable via object metadata (``gsutil stat`` / the
+    Storage API), not only inside the JSON body.
+
+    INFORMATIVE ONLY: this records what the system already classifies — it does NOT
+    change any pipeline action (no model routing, gating, access control, or DLP
+    change). See ``docs/DATA_CLASSIFICATION.md``. Empty inputs (e.g. an error
+    document that never got classified) fall back to the lowest tier.
+    """
+    return {
+        "sensitivity": max_sensitivity or "NONE",
+        "routing": routing or "ok_for_global",
+        "classified_by": "sensitivity_policy",
+    }
+
+
+def _classification_from_raw(raw: dict[str, Any]) -> dict[str, str]:
+    """Classification metadata from a stored result dict (preserved on rewrites)."""
+    return classification_metadata(
+        routing=raw.get("routing", ""), max_sensitivity=raw.get("max_sensitivity", "")
+    )
+
+
 # --- Review routing policy --------------------------------------------------
 
 
@@ -325,8 +355,13 @@ class GcsPiiResultStore:
         except Exception:
             return None
 
-    def _write_json(self, uri: str, obj: Any) -> None:
-        self._os.write(uri, json.dumps(obj).encode("utf-8"), content_type="application/json")
+    def _write_json(
+        self, uri: str, obj: Any, *, metadata: dict[str, str] | None = None
+    ) -> None:
+        self._os.write(
+            uri, json.dumps(obj).encode("utf-8"),
+            content_type="application/json", metadata=metadata,
+        )
 
     def _cached(self, key: str, build: Any) -> Any:
         hit = self._cache.get(key)
@@ -407,7 +442,10 @@ class GcsPiiResultStore:
     def save_document(self, doc: PiiDoc, *, task_index: int = 0) -> None:
         doc.created_at = doc.created_at or _now()
         self._write_json(
-            f"{self._job_dir(doc.job_id)}/results/{doc.document_id}.json", asdict(doc)
+            f"{self._job_dir(doc.job_id)}/results/{doc.document_id}.json", asdict(doc),
+            metadata=classification_metadata(
+                routing=doc.routing, max_sensitivity=doc.max_sensitivity
+            ),
         )
         self._invalidate(doc.job_id)
 
@@ -471,7 +509,7 @@ class GcsPiiResultStore:
             raw["output_prefix"] = output_prefix
         if pages is not None:
             raw["pages"] = pages
-        self._write_json(uri, raw)
+        self._write_json(uri, raw, metadata=_classification_from_raw(raw))
         self._invalidate(job_id)
 
     def mark_rerunning(self, job_id: str, document_id: str) -> None:
@@ -480,7 +518,7 @@ class GcsPiiResultStore:
         if raw is None:
             return
         raw["rerunning"] = _now()
-        self._write_json(uri, raw)
+        self._write_json(uri, raw, metadata=_classification_from_raw(raw))
         self._invalidate(job_id)
 
     def finalize_if_complete(self, job_id: str) -> bool:

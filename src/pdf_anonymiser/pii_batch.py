@@ -4,7 +4,7 @@ Point this at a bucket prefix of PDFs; it renders each document, runs the PII re
 (scan → synthesise PII-free pages → judge, with the DLP ensemble), writes the
 PII-free output to a dataset bucket, and records a per-document + per-page result.
 
-The output lands under ``<dataset>/pii_free/unvalidated/<doc>/`` first. A human then
+The output lands under ``<output>/unvalidated/<doc>/`` first. A human then
 reviews each document in the UI and **promotes** it to ``…/validated/<doc>/`` (or
 leaves it unvalidated with a note saying why) — so the corpus self-segregates into a
 trustworthy ``validated`` half and an ``unvalidated`` half.
@@ -205,7 +205,7 @@ class DocumentResult:
 
     document_id: str
     source_uri: str
-    output_prefix: str  # gs://…/pii_free/unvalidated/<doc>
+    output_prefix: str  # gs://…/<output>/unvalidated/<doc>
     routing: str
     max_sensitivity: str
     verdict: str  # worst per-page verdict
@@ -267,8 +267,8 @@ class PiiBatchProcessor:
     def process_document(self, source_uri: str, *, dataset_base_uri: str) -> DocumentResult:
         """Anonymise one PDF and write its PII-free pages + PDF under ``unvalidated/``.
 
-        ``dataset_base_uri`` is e.g. ``gs://bucket/<dataset>/pii_free``; output goes to
-        ``<base>/unvalidated/<doc>/page-N.png`` and ``<doc>.pdf``.
+        ``dataset_base_uri`` is the job's output root, e.g. ``gs://bucket/anonymised``; output
+        goes to ``<base>/unvalidated/<doc>/page-N.png`` and ``<doc>.pdf``.
         """
         doc_id = _doc_id_from_uri(source_uri)
         pdf_bytes = self._store.read(source_uri)

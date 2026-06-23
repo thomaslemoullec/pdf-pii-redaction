@@ -106,17 +106,16 @@ So a `objectViewer`-on-`source/` condition would break source enumeration, and a
 
 ### Reason 2 — the source/output prefixes are NOT fixed in code
 
-The `source/` and `output/` prefixes are a documented *convention*, not enforced paths. The
-job-launch form takes arbitrary `gs://` URIs for both:
+The source and output prefixes are an operator-chosen convention, not fixed paths:
 - `webapp/app.py:391,403` — `source` and `output` are free-form `Form(...)` fields.
-- `webapp/templates/launch.html:14,17` — placeholders are `gs://my-bucket/incoming/` and
-  `gs://my-bucket/anonymised` (note: not `output/`, and possibly a different bucket).
-- `pii_batch.py:7,270,276` — the default output layout is `<dataset>/pii_free/unvalidated/<doc>`.
+- `pii_batch.py:276` — the batch writes to `<output>/unvalidated/<doc>`, where `<output>` is
+  the operator-supplied output root, so the layout follows whatever prefix a job is given.
 
 Only `_pii_runs/` is a constant prefix (`PII_CONTROL_URI = gs://<bucket>/_pii_runs`,
-`infra/cloud_run.tf:15`). A write condition pinned to `objects/output/` would therefore
-**deny** any job whose output URI is anywhere else — including the code's own default
-`pii_free/` layout — silently breaking the batch writes.
+`infra/cloud_run.tf`). A write condition pinned to a single hard-coded prefix would therefore
+**deny** any job whose output root differs — which is exactly why the write root is a
+configurable variable (`data_output_prefix`) shared by the IAM condition and the app, rather
+than hard-coded.
 
 ### What shipped
 
@@ -130,13 +129,15 @@ Only `_pii_runs/` is a constant prefix (`PII_CONTROL_URI = gs://<bucket>/_pii_ru
 This is the **hard guardrail**: any object write outside `output/`/`_pii_runs/` is denied by
 IAM regardless of application code.
 
-**App (`src/pdf_anonymiser/webapp/app.py`)** — `validate_job_uris` enforces the fixed layout
-at job launch: `source` must be under `gs://<data-bucket>/source/` and `output` under
-`gs://<data-bucket>/output/` (data bucket derived from `PII_CONTROL_URI`). A misdirected job
-is rejected with a clear 400 + banner instead of a late 403 at write time. Enforcement is
+**App (`src/pdf_anonymiser/webapp/app.py`)** — `validate_job_uris` enforces the layout at
+job launch: `output` must be under the configured write root `gs://<data-bucket>/<PII_OUTPUT_PREFIX>/`,
+and `source` must simply live in the data bucket (reads are bucket-wide, so any input prefix —
+e.g. `incoming-*/` — is allowed). The data bucket is derived from `PII_CONTROL_URI` and the
+write root from `PII_OUTPUT_PREFIX` (the same value that drives the IAM condition). A misdirected
+job is rejected with a clear 400 + banner instead of a late 403 at write time. Enforcement is
 active only when `PII_CONTROL_URI` is set (i.e. in the deployed app). The launch form's
-placeholders/hints now show the required `source/` and `output/` prefixes
-(`webapp/templates/launch.html`). Covered by tests in `tests/test_webapp.py`.
+placeholders/hints reflect the configured write prefix (`webapp/templates/launch.html`).
+Covered by tests in `tests/test_webapp.py`.
 
 ### Net effect (write root is configurable via `data_output_prefix`)
 

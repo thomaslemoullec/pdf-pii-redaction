@@ -18,7 +18,7 @@ I/O-bound sits behind a protocol so the core is unit-tested without GCS or Gemin
                    │ immutable objects                ▲ OBJECT_FINALIZE
                    ▼                                  │ notifications
    ┌──────── Cloud Storage (one bucket) ──────────────┴───┐     ┌── Pub/Sub ──┐
-   │  incoming/…                 source PDFs              │     │  events      │
+   │  incoming-*/…               source PDFs              │     │  events      │
    │  _pii_runs/<job>/…          control plane (state)    │────►│  started     │
    │  anonymised/{unvalidated,validated}/<doc>/…  output  │     │  finished    │
    └──────────────────────────────────────────────────────┘     └─────────────┘
@@ -55,9 +55,10 @@ operator's free-text description to a scoped PII-type list.)
 3. **Assemble** into a per-document result and write the PII-free pages + a recombined
    PDF under `…/unvalidated/<doc>/`.
 
-**Score & verdict** (`redaction_metrics.py`): `score = removal_recall × fidelity`;
-verdict is `pass` (no leak, fidelity ≥ 0.9), `review` (no leak, lower fidelity), `fail`
-(a real value survived), or `error`. Document = worst page verdict, mean score.
+**Score & verdict** (`redaction_metrics.py`): `score = F1(removal_recall, fidelity)` (the
+harmonic mean of the two); verdict is `pass` (no leak, score ≥ threshold, default 0.85),
+`review` (no leak, below threshold), `fail` (a real value survived), or `error`. Document =
+worst page verdict, mean score.
 
 ### Certified leak check: value-carryover, *on* by default
 The output check compares **values**, not types: DLP reads the real values on the source
@@ -145,13 +146,15 @@ queue at all.
 
 ## Security & residency
 
-- One **dedicated, least-privilege** service account: bucket-scoped `objectAdmin` (not
-  project-wide), `aiplatform.user`, optional `dlp.user`, publish-only on the events
-  topic, and `run.developer` on its own job.
-- The bucket enforces uniform IAM + public-access-prevention, with optional CMEK and
-  retention.
+- One **dedicated, least-privilege** service account: on the data bucket, read+list via
+  `objectViewer` and writes confined by an IAM Condition to the output + `_pii_runs/` prefixes
+  via `objectUser` (so it cannot mutate or delete the source inputs); plus `aiplatform.user`,
+  optional `dlp.user`, publish-only on the events topic, and `run.developer` on its own job.
+- The bucket enforces uniform IAM + public-access-prevention, with object versioning and a
+  soft-delete recovery window, optional CMEK, and Cloud Audit Data Access logs. Bucket-wide
+  WORM retention is intentionally avoided — it would block the pipeline's overwrites/deletes.
 - **Residency**: page content (real PII) is the model input; the client defaults to an
-  EU Vertex location. Preview models may be global-only — a documented, deliberate
+  EU Vertex location. The newest GA models may be global-only — a documented, deliberate
   trade-off (see the README).
 - Detectors are **PII-minimal** (types + locations, never values), so stored metadata
   can't itself leak.

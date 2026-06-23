@@ -9,10 +9,13 @@ def test_batch_logs_url_is_a_scoped_logging_link() -> None:
     url = batch_logs_url("proj-x", "europe-west3", "idp-pii-batch-dev", "job123")
     assert url.startswith("https://console.cloud.google.com/logs/query;query=")
     assert url.endswith("?project=proj-x")
-    # the query (url-encoded) targets the right job + run
+    # the query (url-encoded) targets the right job + run + location
     assert "cloud_run_job" in url
     assert "idp-pii-batch-dev" in url
-    assert "job123" in url
+    assert "europe-west3" in url
+    # job_id is accepted for call-compatibility but intentionally NOT used as a filter
+    # (only per-document summary lines carry it; filtering on it hides the bulk of the logs)
+    assert "job123" not in url
 
 
 def test_publish_event_noop_without_topic() -> None:

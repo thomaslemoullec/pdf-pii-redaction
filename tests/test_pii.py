@@ -144,7 +144,7 @@ def test_dlp_detector_calls_client_and_maps(
     from pdf_anonymiser.pii import DLP_INFO_TYPES, DlpPiiDetector
 
     fake_module = types.ModuleType("dlp_v2")
-    fake_module.Likelihood = types.SimpleNamespace(POSSIBLE=4)  # type: ignore[attr-defined]
+    fake_module.Likelihood = types.SimpleNamespace(POSSIBLE=4, LIKELY=5)  # type: ignore[attr-defined]
     fake_module.ByteContentItem = types.SimpleNamespace(  # type: ignore[attr-defined]
         BytesType=types.SimpleNamespace(IMAGE_PNG=1)
     )
@@ -339,7 +339,7 @@ def test_scan_values_requests_quotes_and_returns_pairs(
     from pdf_anonymiser.pii import DlpPiiDetector
 
     fake_module = types.ModuleType("dlp_v2")
-    fake_module.Likelihood = types.SimpleNamespace(POSSIBLE=4)  # type: ignore[attr-defined]
+    fake_module.Likelihood = types.SimpleNamespace(POSSIBLE=4, LIKELY=5)  # type: ignore[attr-defined]
     fake_module.ByteContentItem = types.SimpleNamespace(  # type: ignore[attr-defined]
         BytesType=types.SimpleNamespace(IMAGE_PNG=1)
     )

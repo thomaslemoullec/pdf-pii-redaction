@@ -1,9 +1,9 @@
 """Unit tests for the free-form description → PII type planner.
 
-The model's *intelligence* (does it map English/German prose to the right types?) is
-covered live in tests/test_pii_type_agent_integration.py. Here we cover the
-deterministic parts with no model: the vocabulary filter and the response-parse +
-request-build glue, exercised through an injected fake client.
+The model's *intelligence* (does it map English/German prose to the right types?) is a live
+concern verified against the real model at deploy time. Here we cover the deterministic parts
+with no model: the vocabulary filter and the response-parse + request-build glue, exercised
+through an injected fake client.
 """
 
 from __future__ import annotations

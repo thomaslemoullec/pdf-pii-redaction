@@ -213,7 +213,11 @@ class InMemoryPiiResultStore:
     def get_job(self, job_id: str) -> PiiJob | None:
         job = self._jobs.get(job_id)
         if job is not None:
-            job.completed = len(self._docs.get(job_id, {}))
+            # Mirror the GCS store: a finished job reports completed == total; while running,
+            # count the result objects saved so far.
+            job.completed = (
+                job.total if job.status == "done" else len(self._docs.get(job_id, {}))
+            )
         return job
 
     def list_jobs(self) -> list[PiiJob]:

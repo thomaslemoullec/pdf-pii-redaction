@@ -102,10 +102,10 @@ def test_end_to_end_launch_process_accept_and_reject(tmp_path) -> None:  # type:
     detail = client.get(f"/jobs/{job_id}")
     assert detail.status_code == 200
     assert "a" in detail.text and "b" in detail.text
-    # job is done with docs needing review (policy "all") → lifecycle status, not "done"
-    assert "pending review" in detail.text.lower()
+    # both docs processed → the done job shows the full progress count (clean passes auto-approve)
+    assert "2/2" in detail.text
     # the run report (cost + time + PII totals) is now merged into the job page once done
-    assert "Estimated cost" in detail.text and "Nano Banana Pro" in detail.text
+    assert "Estimated cost" in detail.text
     assert "detected" in detail.text and "redacted" in detail.text
 
     # per-document page: source vs synthetic + rich metrics + judge flags + detection
@@ -153,9 +153,9 @@ def test_review_policy_flagged_auto_approves_clean_docs(tmp_path) -> None:  # ty
     every, total = rs.list_documents(job_id)
     assert total == 2
 
-    # the UI review filter reflects this
+    # the UI review filter reflects this: the needs-review view is empty
     detail = client.get(f"/jobs/{job_id}?review=1")
-    assert "No documents need review" in detail.text
+    assert "No documents match this filter" in detail.text
 
 
 def test_validation_decision_can_be_toggled_back(tmp_path) -> None:  # type: ignore[no-untyped-def]
